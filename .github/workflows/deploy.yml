@@ -34,11 +34,9 @@ jobs:
 
       - run: npm run build
 
-      # enablement: true turns Pages on (build type = GitHub Actions) on the
-      # first run, so there is nothing to toggle in the repo Settings UI.
+      # Pages is already enabled on the repo (build type = GitHub Actions),
+      # so this just wires up the deployment for the artifact upload.
       - uses: actions/configure-pages@v5
-        with:
-          enablement: true
 
       # Upload the built site (dist/) as the Pages artifact.
       - uses: actions/upload-pages-artifact@v3
