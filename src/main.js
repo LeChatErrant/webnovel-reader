@@ -50,6 +50,11 @@ const el = {
   landing: document.getElementById("landing"),
   landingOpen: document.getElementById("landing-open"),
   landingSample: document.getElementById("landing-sample"),
+  landingInstall: document.getElementById("landing-install"),
+  btnInstall: document.getElementById("btn-install"),
+  installSheet: document.getElementById("install-sheet"),
+  installScrim: document.getElementById("install-scrim"),
+  installSheetClose: document.getElementById("install-sheet-close"),
   fileInput: document.getElementById("file-input"),
   app: document.getElementById("app"),
 };
@@ -266,10 +271,85 @@ function readFile(file) {
 }
 
 // -------------------------------------------------------------------------
+// Install (Add to Home Screen)
+//
+// Two very different platforms:
+//  - Chrome / Edge / Android fire `beforeinstallprompt`; we stash it and let
+//    our own button trigger the real one-tap install.
+//  - iOS / iPad Safari have no such event -- the only way in is Share -> Add
+//    to Home Screen -- so the button opens a short instructions sheet instead.
+// Either way the button hides itself once the app is installed.
+// -------------------------------------------------------------------------
+let deferredInstallPrompt = null;
+
+function isStandalone() {
+  return (
+    window.matchMedia("(display-mode: standalone)").matches ||
+    window.navigator.standalone === true
+  );
+}
+function isIOS() {
+  return /iphone|ipad|ipod/i.test(navigator.userAgent) && !window.MSStream;
+}
+function showInstallUI() {
+  el.btnInstall.hidden = false;
+  el.landingInstall.hidden = false;
+}
+function hideInstallUI() {
+  el.btnInstall.hidden = true;
+  el.landingInstall.hidden = true;
+}
+function openInstallSheet() {
+  el.installSheet.hidden = false;
+}
+function closeInstallSheet() {
+  el.installSheet.hidden = true;
+}
+
+async function handleInstallClick() {
+  // Native prompt available (Chromium): fire it directly.
+  if (deferredInstallPrompt) {
+    deferredInstallPrompt.prompt();
+    const { outcome } = await deferredInstallPrompt.userChoice;
+    deferredInstallPrompt = null;
+    if (outcome === "accepted") {
+      hideInstallUI();
+    }
+    return;
+  }
+  // No native prompt (iOS, or not yet eligible): show manual instructions.
+  openInstallSheet();
+}
+
+window.addEventListener("beforeinstallprompt", (e) => {
+  e.preventDefault();
+  deferredInstallPrompt = e;
+  if (!isStandalone()) {
+    showInstallUI();
+  }
+});
+window.addEventListener("appinstalled", () => {
+  deferredInstallPrompt = null;
+  hideInstallUI();
+  closeInstallSheet();
+});
+
+// iOS never fires beforeinstallprompt, so surface the button (which leads to
+// instructions) whenever we are in iOS Safari and not already installed.
+if (!isStandalone() && isIOS()) {
+  showInstallUI();
+}
+
+// -------------------------------------------------------------------------
 // Wire up events
 // -------------------------------------------------------------------------
 el.btnToc.addEventListener("click", openDrawer);
 el.scrim.addEventListener("click", closeDrawer);
+
+el.btnInstall.addEventListener("click", handleInstallClick);
+el.landingInstall.addEventListener("click", handleInstallClick);
+el.installScrim.addEventListener("click", closeInstallSheet);
+el.installSheetClose.addEventListener("click", closeInstallSheet);
 
 el.btnPrev.addEventListener("click", () => rendition && rendition.prev());
 el.btnNext.addEventListener("click", () => rendition && rendition.next());
@@ -292,6 +372,11 @@ el.landingSample.addEventListener("click", (e) => {
 
 // Keyboard: arrows page through chapters, Esc closes the drawer.
 document.addEventListener("keydown", (e) => {
+  // Esc closes the install sheet even before a book is open.
+  if (e.key === "Escape" && !el.installSheet.hidden) {
+    closeInstallSheet();
+    return;
+  }
   if (!rendition) {
     return;
   }

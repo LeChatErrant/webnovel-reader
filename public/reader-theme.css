@@ -45,9 +45,16 @@ body {
   font-size: 18px !important;
   line-height: 1.8 !important;
   text-align: left !important;
-  max-width: 33em;
-  margin: 0 auto !important;
-  padding: 12px 24px 72px !important;
+  /* Full-width body so epub.js sizes its view to the whole container (which is
+     what makes the entire window scrollable, gutters included). The reading
+     column is then centred with symmetric horizontal padding rather than
+     `margin: 0 auto` -- epub.js pins a narrower body to the left, so auto
+     margins don't hold. `max(24px, ...)` keeps a sane gutter on narrow/mobile. */
+  max-width: none !important;
+  width: 100% !important;
+  margin: 0 !important;
+  padding: 12px max(24px, calc((100% - 33em) / 2)) 72px !important;
+  box-sizing: border-box !important;
   -webkit-font-smoothing: antialiased;
 }
 

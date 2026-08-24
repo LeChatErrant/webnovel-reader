@@ -261,6 +261,63 @@ html, body {
 .primary-btn:active { transform: translateY(1px); }
 .primary-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
+/* Secondary "Install app" button on the landing card. */
+.ghost-btn {
+  appearance: none;
+  display: block;
+  margin: 12px auto 0;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--heading);
+  font-weight: 600;
+  font-size: 14px;
+  padding: 9px 20px;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.ghost-btn:hover { background: var(--bar-hi); color: var(--accent); }
+.ghost-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* ---- Install-help sheet (iOS) ----------------------------------------- */
+.sheet { position: fixed; inset: 0; z-index: 70; }
+.sheet[hidden] { display: none; }
+.sheet-scrim { position: absolute; inset: 0; background: rgba(0, 0, 0, 0.55); }
+.sheet-card {
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  transform: translateX(-50%);
+  width: min(100%, 440px);
+  background: var(--bar);
+  border: 1px solid var(--border);
+  border-bottom: 0;
+  border-radius: 18px 18px 0 0;
+  padding: 22px 22px calc(22px + env(safe-area-inset-bottom));
+  box-shadow: 0 -12px 40px rgba(0, 0, 0, 0.4);
+  animation: sheet-up 0.26s cubic-bezier(0.4, 0, 0.2, 1);
+}
+@keyframes sheet-up {
+  from { transform: translate(-50%, 100%); }
+  to { transform: translate(-50%, 0); }
+}
+.sheet-title { margin: 0 0 6px; font-size: 18px; color: var(--heading); font-weight: 700; }
+.sheet-lead { margin: 0 0 16px; font-size: 14px; line-height: 1.55; }
+.sheet-steps {
+  margin: 0 0 20px;
+  padding-left: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  font-size: 14.5px;
+  line-height: 1.5;
+  color: var(--heading);
+}
+.sheet-steps strong { color: var(--accent); font-weight: 600; }
+.sheet-steps svg { vertical-align: -3px; color: var(--accent); }
+.sheet-card .primary-btn { display: block; width: 100%; }
+
 @media (prefers-reduced-motion: reduce) {
   .drawer, .scrim { transition: none; }
+  .sheet-card { animation: none; }
 }
