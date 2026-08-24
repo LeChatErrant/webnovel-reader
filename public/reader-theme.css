@@ -1,0 +1,140 @@
+/* Injected INTO each epub chapter document by epub.js (themes.register).
+   This is what makes the text look like Webnovel's dark reader, matching the
+   KOReader setup exactly:
+     background #1f2129 · text #83848f · headings #a9aab3 · links #9aa6c9
+     Merriweather 18px / line-height 1.8 · ragged-left · no indent · spaced.
+   Font paths are absolute (/fonts/...) so they resolve against the site
+   origin, not the epub's internal base URL. */
+
+@font-face {
+  font-family: "Merriweather";
+  src: url("/fonts/Merriweather-Regular.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Merriweather";
+  src: url("/fonts/Merriweather-Bold.ttf") format("truetype");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Merriweather";
+  src: url("/fonts/Merriweather-Italic.ttf") format("truetype");
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Merriweather";
+  src: url("/fonts/Merriweather-BoldItalic.ttf") format("truetype");
+  font-weight: 700;
+  font-style: italic;
+  font-display: swap;
+}
+
+html {
+  background: #1f2129 !important;
+}
+body {
+  background: #1f2129 !important;
+  color: #b4b5c0 !important;
+  font-family: "Merriweather", Georgia, serif !important;
+  font-size: 18px !important;
+  line-height: 1.8 !important;
+  text-align: left !important;
+  max-width: 33em;
+  margin: 0 auto !important;
+  padding: 12px 24px 72px !important;
+  -webkit-font-smoothing: antialiased;
+}
+
+p, div, span, li, td, th, blockquote {
+  font-family: "Merriweather", Georgia, serif !important;
+  color: #b4b5c0 !important;
+  line-height: 1.8 !important;
+}
+
+p {
+  text-indent: 0 !important;
+  margin: 0 0 1.35em !important;
+  text-align: left !important;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  color: #a9aab3 !important;
+  font-family: "Merriweather", Georgia, serif !important;
+  line-height: 1.4 !important;
+  text-align: left !important;
+  margin: 1.2em 0 0.7em !important;
+}
+h1 { font-size: 1.5em !important; }
+h2 { font-size: 1.3em !important; }
+
+a { color: #9aa6c9 !important; text-decoration: none !important; }
+
+img, svg {
+  max-width: 100% !important;
+  height: auto !important;
+}
+
+hr {
+  border: 0 !important;
+  border-top: 1px solid #2b2e38 !important;
+  margin: 2em auto !important;
+  width: 40% !important;
+}
+
+::selection { background: #33404f; color: #d6d8e0; }
+
+/* Hide the scrollbar inside the chapter document too, so no native overlay
+   bar shows over the text. Scrolling still works via wheel / trackpad / touch. */
+html { scrollbar-width: none !important; }
+::-webkit-scrollbar { width: 0 !important; height: 0 !important; display: none !important; }
+
+/* End-of-chapter navigation block (injected by the app into each chapter). */
+.chapter-end {
+  margin: 3.5em 0 1em !important;
+  padding-top: 2em !important;
+  border-top: 1px solid #2b2e38 !important;
+}
+.chapter-end__label {
+  text-align: center !important;
+  font-family: system-ui, -apple-system, sans-serif !important;
+  font-size: 12px !important;
+  letter-spacing: 0.14em !important;
+  text-transform: uppercase !important;
+  color: #6a6c78 !important;
+  margin-bottom: 1.4em !important;
+}
+.chapter-end__nav {
+  display: flex !important;
+  gap: 12px !important;
+  align-items: stretch !important;
+}
+.chapter-end .cn-btn {
+  flex: 1 1 0 !important;
+  font-family: system-ui, -apple-system, sans-serif !important;
+  font-size: 15px !important;
+  font-weight: 600 !important;
+  padding: 14px 16px !important;
+  border-radius: 12px !important;
+  border: 1px solid #2b2e38 !important;
+  cursor: pointer !important;
+  transition: filter 0.15s, background 0.15s !important;
+  text-align: center !important;
+}
+.chapter-end .cn-prev {
+  color: #a9aab3 !important;
+  background: #262a37 !important;
+}
+.chapter-end .cn-prev:hover:not(:disabled) { background: #2f3444 !important; }
+.chapter-end .cn-next {
+  color: #14161c !important;
+  background: #9aa6c9 !important;
+  border-color: #9aa6c9 !important;
+}
+.chapter-end .cn-next:hover:not(:disabled) { filter: brightness(1.08) !important; }
+.chapter-end .cn-btn:disabled { opacity: 0.32 !important; cursor: default !important; }
