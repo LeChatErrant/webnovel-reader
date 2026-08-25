@@ -101,47 +101,77 @@ hr {
 html { scrollbar-width: none !important; }
 ::-webkit-scrollbar { width: 0 !important; height: 0 !important; display: none !important; }
 
-/* End-of-chapter navigation block (injected by the app into each chapter). */
+/* End-of-chapter navigation block (injected by the app into each chapter).
+   Kept deliberately quiet: a hairline rule, a small label, and two plain
+   text links -- no filled buttons -- so it reads as part of the page. The
+   generous bottom margin gives the last line room to breathe above the
+   screen edge (and any phone home indicator). */
 .chapter-end {
-  margin: 3.5em 0 1em !important;
-  padding-top: 2em !important;
+  margin: 3.5em 0 3em !important;
+  padding-top: 1.8em !important;
   border-top: 1px solid #2b2e38 !important;
 }
 .chapter-end__label {
   text-align: center !important;
   font-family: system-ui, -apple-system, sans-serif !important;
-  font-size: 12px !important;
-  letter-spacing: 0.14em !important;
+  font-size: 11px !important;
+  letter-spacing: 0.16em !important;
   text-transform: uppercase !important;
   color: #6a6c78 !important;
-  margin-bottom: 1.4em !important;
+  margin-bottom: 1.5em !important;
 }
 .chapter-end__nav {
   display: flex !important;
-  gap: 12px !important;
-  align-items: stretch !important;
+  justify-content: space-between !important;
+  align-items: center !important;
+  gap: 16px !important;
 }
 .chapter-end .cn-btn {
-  flex: 1 1 0 !important;
   font-family: system-ui, -apple-system, sans-serif !important;
-  font-size: 15px !important;
-  font-weight: 600 !important;
-  padding: 14px 16px !important;
-  border-radius: 12px !important;
-  border: 1px solid #2b2e38 !important;
+  font-size: 14.5px !important;
+  font-weight: 500 !important;
+  background: transparent !important;
+  border: 0 !important;
+  padding: 8px 2px !important;
   cursor: pointer !important;
-  transition: filter 0.15s, background 0.15s !important;
+  transition: color 0.15s !important;
+}
+.chapter-end .cn-prev { color: #83848f !important; }
+.chapter-end .cn-prev:hover { color: #a9aab3 !important; }
+.chapter-end .cn-next { color: #9aa6c9 !important; font-weight: 600 !important; }
+.chapter-end .cn-next:hover { color: #b4bde0 !important; }
+/* At the first / last chapter the unavailable side is hidden outright, but
+   still occupies its slot so the remaining link stays pinned to its edge. */
+.chapter-end .cn-btn:disabled { visibility: hidden !important; cursor: default !important; }
+
+/* End-of-volume boundary card (a book that is part of a series). Instead of a
+   silent jump, the reader shows this: the next volume's name and one primary
+   action to continue into it, plus a quiet way back to the series. */
+.chapter-end .vol-boundary {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  gap: 14px !important;
   text-align: center !important;
 }
-.chapter-end .cn-prev {
-  color: #a9aab3 !important;
-  background: #262a37 !important;
+.chapter-end .vol-boundary__lead {
+  font-family: system-ui, -apple-system, sans-serif !important;
+  font-size: 14px !important;
+  color: #83848f !important;
+  line-height: 1.5 !important;
 }
-.chapter-end .cn-prev:hover:not(:disabled) { background: #2f3444 !important; }
-.chapter-end .cn-next {
-  color: #14161c !important;
+.chapter-end .vol-boundary__go {
+  display: inline-block !important;
+  font-weight: 600 !important;
+  color: #12141a !important;
   background: #9aa6c9 !important;
-  border-color: #9aa6c9 !important;
+  padding: 11px 22px !important;
+  border-radius: 22px !important;
 }
-.chapter-end .cn-next:hover:not(:disabled) { filter: brightness(1.08) !important; }
-.chapter-end .cn-btn:disabled { opacity: 0.32 !important; cursor: default !important; }
+.chapter-end .vol-boundary__go:hover { filter: brightness(1.08) !important; color: #12141a !important; }
+.chapter-end .vol-boundary__back {
+  color: #83848f !important;
+  font-weight: 500 !important;
+  padding: 4px !important;
+}
+.chapter-end .vol-boundary__back:hover { color: #a9aab3 !important; }
