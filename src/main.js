@@ -142,11 +142,20 @@ function progressBar(pct, variant) {
 function chapterCount(book) {
   return book.spineCount || book.chapters?.length || 1;
 }
+// The furthest chapter ever reached in this book. Progress is measured from
+// here (not the current resume point), so jumping *back* into an earlier
+// chapter never lowers the reported percentage. Records written before this
+// existed fall back to the current chapter.
+function furthestIndex(book) {
+  const p = progressMap[book.id];
+  if (!p) return -1;
+  return Math.max(p.maxChapterIndex ?? -1, p.chapterIndex ?? 0);
+}
 function bookPercent(book) {
   const p = progressMap[book.id];
   if (p?.finished) return 100;
   if (!p) return 0;
-  return Math.min(100, Math.round(((p.chapterIndex + 1) / chapterCount(book)) * 100));
+  return Math.min(100, Math.round(((furthestIndex(book) + 1) / chapterCount(book)) * 100));
 }
 function bookIsStarted(book) {
   return !!progressMap[book.id];
@@ -847,12 +856,17 @@ async function renderReader(lib) {
     highlightToc(currentHref);
     updateChapterTitle(currentHref);
     const total = book?.spine?.spineItems?.length || chapterCount(lib);
-    const finished = total > 0 && idx >= total - 1;
+    const prev = progressMap[lib.id];
+    // Furthest-reached: the recorded high-water mark only ever rises, and once
+    // a book is finished it stays finished even if you reopen an early chapter.
+    const maxChapterIndex = Math.max(prev?.maxChapterIndex ?? -1, idx);
+    const finished = prev?.finished || (total > 0 && maxChapterIndex >= total - 1);
     putProgress({
       bookId: lib.id,
       cfi: location?.start?.cfi || null,
       chapterIndex: idx,
-      chapterLabel: chapterLabelFor(currentHref) || progressMap[lib.id]?.chapterLabel || "",
+      maxChapterIndex,
+      chapterLabel: chapterLabelFor(currentHref) || prev?.chapterLabel || "",
       finished,
       updatedAt: Date.now(),
     });
