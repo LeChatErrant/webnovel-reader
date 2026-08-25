@@ -55,6 +55,11 @@ html, body {
   z-index: 40;
 }
 
+/* The bar is reading chrome only: on the empty state its controls (home,
+   chapters, paging) are all inert, so we hide the whole bar and let the
+   landing card stand on its own. */
+#app:not(.reading) #topbar { display: none; }
+
 /* Title block: an optional cover thumbnail next to a text column. The book
    name is the prominent line; once a chapter is known it appears as a quiet
    secondary line beneath it. The whole group stays centered in the bar. */

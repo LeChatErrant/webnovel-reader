@@ -33,6 +33,14 @@ async function idbSet(key, value) {
     tx.onerror = () => reject(tx.error);
   });
 }
+async function idbDelete(key) {
+  const db = await idb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE, "readwrite").objectStore(STORE).delete(key);
+    tx.onsuccess = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
 
 // -------------------------------------------------------------------------
 // DOM handles
@@ -42,10 +50,10 @@ const el = {
   coverThumb: document.getElementById("cover-thumb"),
   topTitle: document.getElementById("book-title"),
   chapterTitle: document.getElementById("chapter-title"),
+  btnHome: document.getElementById("btn-home"),
   btnToc: document.getElementById("btn-toc"),
   btnPrev: document.getElementById("btn-prev"),
   btnNext: document.getElementById("btn-next"),
-  btnOpen: document.getElementById("btn-open"),
   drawer: document.getElementById("drawer"),
   scrim: document.getElementById("scrim"),
   tocList: document.getElementById("toc-list"),
@@ -126,6 +134,7 @@ async function openBook(buffer, name, { persist = true } = {}) {
   await rendition.display(savedCfi || undefined);
 
   hideLanding();
+  el.app.classList.add("reading");
   el.btnPrev.disabled = false;
   el.btnNext.disabled = false;
 
@@ -321,6 +330,42 @@ function showLanding() {
   el.landing.classList.remove("hide");
 }
 
+// Close the current book and return to the initial empty state. The book's
+// saved reading position is kept (reopening it resumes where you left off),
+// but we forget it as the "last book" so a reload stays on the landing.
+function goHome() {
+  if (rendition) {
+    rendition.destroy();
+    rendition = null;
+  }
+  book = null;
+  bookKey = null;
+  el.viewer.innerHTML = "";
+
+  // Reset the top bar back to its blank state.
+  currentHref = null;
+  flatToc = [];
+  el.tocList.innerHTML = "";
+  el.topTitle.textContent = "Reader";
+  document.title = "Reader";
+  updateChapterTitle("");
+  if (coverObjectUrl) {
+    URL.revokeObjectURL(coverObjectUrl);
+    coverObjectUrl = null;
+  }
+  el.coverThumb.hidden = true;
+  el.coverThumb.removeAttribute("src");
+  el.titleBlock.classList.remove("has-cover");
+
+  el.app.classList.remove("reading");
+  el.btnPrev.disabled = true;
+  el.btnNext.disabled = true;
+  closeDrawer();
+  showLanding();
+
+  idbDelete("lastBook").catch(() => {});
+}
+
 // -------------------------------------------------------------------------
 // File loading
 // -------------------------------------------------------------------------
@@ -424,6 +469,7 @@ if (!isStandalone() && isIOS()) {
 // -------------------------------------------------------------------------
 // Wire up events
 // -------------------------------------------------------------------------
+el.btnHome.addEventListener("click", goHome);
 el.btnToc.addEventListener("click", openDrawer);
 el.scrim.addEventListener("click", closeDrawer);
 
@@ -437,7 +483,6 @@ el.btnPrev.addEventListener("click", () => rendition && rendition.prev());
 el.btnNext.addEventListener("click", () => rendition && rendition.next());
 
 const pickFile = () => el.fileInput.click();
-el.btnOpen.addEventListener("click", pickFile);
 el.landingOpen.addEventListener("click", pickFile);
 el.fileInput.addEventListener("change", (e) => readFile(e.target.files[0]));
 
