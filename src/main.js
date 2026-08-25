@@ -51,7 +51,9 @@ const el = {
   landingOpen: document.getElementById("landing-open"),
   landingSample: document.getElementById("landing-sample"),
   landingInstall: document.getElementById("landing-install"),
-  btnInstall: document.getElementById("btn-install"),
+  installBar: document.getElementById("install-bar"),
+  installBarAction: document.getElementById("install-bar-action"),
+  installBarDismiss: document.getElementById("install-bar-dismiss"),
   installSheet: document.getElementById("install-sheet"),
   installScrim: document.getElementById("install-scrim"),
   installSheetClose: document.getElementById("install-sheet-close"),
@@ -291,13 +293,31 @@ function isStandalone() {
 function isIOS() {
   return /iphone|ipad|ipod/i.test(navigator.userAgent) && !window.MSStream;
 }
+// The footer nudge is remembered once dismissed, so we never nag again. The
+// landing card's "Install app" button stays available regardless.
+const INSTALL_DISMISSED = "installDismissed";
+
 function showInstallUI() {
-  el.btnInstall.hidden = false;
   el.landingInstall.hidden = false;
+  if (localStorage.getItem(INSTALL_DISMISSED) !== "1") {
+    el.installBar.hidden = false;
+    // Next frame so the slide-up transition runs from the hidden state.
+    requestAnimationFrame(() => el.installBar.classList.add("show"));
+  }
 }
 function hideInstallUI() {
-  el.btnInstall.hidden = true;
   el.landingInstall.hidden = true;
+  el.installBar.classList.remove("show");
+  el.installBar.hidden = true;
+}
+function dismissInstallBar() {
+  localStorage.setItem(INSTALL_DISMISSED, "1");
+  el.installBar.classList.remove("show");
+  const onEnd = () => {
+    el.installBar.hidden = true;
+    el.installBar.removeEventListener("transitionend", onEnd);
+  };
+  el.installBar.addEventListener("transitionend", onEnd);
 }
 function openInstallSheet() {
   el.installSheet.hidden = false;
@@ -346,7 +366,8 @@ if (!isStandalone() && isIOS()) {
 el.btnToc.addEventListener("click", openDrawer);
 el.scrim.addEventListener("click", closeDrawer);
 
-el.btnInstall.addEventListener("click", handleInstallClick);
+el.installBarAction.addEventListener("click", handleInstallClick);
+el.installBarDismiss.addEventListener("click", dismissInstallBar);
 el.landingInstall.addEventListener("click", handleInstallClick);
 el.installScrim.addEventListener("click", closeInstallSheet);
 el.installSheetClose.addEventListener("click", closeInstallSheet);

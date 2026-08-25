@@ -279,6 +279,79 @@ html, body {
 .ghost-btn:hover { background: var(--bar-hi); color: var(--accent); }
 .ghost-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
+/* ---- Install nudge (slim footer) --------------------------------------
+   Only shown when the app is installable; overlays the bottom of the reading
+   surface and slides up on appear. Dismissible, and remembered once closed. */
+.install-bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 45;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
+  padding-left: max(12px, env(safe-area-inset-left));
+  padding-right: max(12px, env(safe-area-inset-right));
+  background: color-mix(in srgb, var(--bar) 92%, transparent);
+  backdrop-filter: saturate(120%) blur(8px);
+  border-top: 1px solid var(--border);
+  transform: translateY(100%);
+  transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.install-bar.show { transform: translateY(0); }
+.install-bar[hidden] { display: none; }
+
+.install-bar__icon { color: var(--accent); flex: 0 0 auto; }
+.install-bar__text {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 13.5px;
+  color: var(--heading);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.install-bar__action {
+  appearance: none;
+  flex: 0 0 auto;
+  border: 0;
+  background: var(--accent);
+  color: #12141a;
+  font-weight: 600;
+  font-size: 13.5px;
+  padding: 7px 16px;
+  border-radius: 9px;
+  cursor: pointer;
+  transition: filter 0.15s, transform 0.05s;
+}
+.install-bar__action:hover { filter: brightness(1.08); }
+.install-bar__action:active { transform: translateY(1px); }
+.install-bar__action:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.install-bar__dismiss {
+  appearance: none;
+  flex: 0 0 auto;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.install-bar__dismiss:hover { background: var(--bar-hi); color: var(--heading); }
+.install-bar__dismiss:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .install-bar { transition: none; }
+}
+
 /* ---- Install-help sheet (iOS) ----------------------------------------- */
 .sheet { position: fixed; inset: 0; z-index: 70; }
 .sheet[hidden] { display: none; }
