@@ -18,6 +18,9 @@
   --accent: #9aa6c9;
   --accent-soft: #262a37;
   --bar-h: 52px;
+  /* Reading column width -- mirrors reader-theme.css (33em at its 18px font).
+     Used to align the top-bar title with the centered reading column. */
+  --reading-col: 594px;
   --font-ui: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 }
 
@@ -52,18 +55,95 @@ html, body {
   z-index: 40;
 }
 
-.book-title {
+/* Title block: an optional cover thumbnail next to a text column. The book
+   name is the prominent line; once a chapter is known it appears as a quiet
+   secondary line beneath it. The whole group stays centered in the bar. */
+.title-block {
   flex: 1;
   min-width: 0;
-  text-align: center;
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--heading);
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  padding: 0 4px;
+  overflow: hidden;
+}
+
+.cover-thumb {
+  flex: 0 0 auto;
+  height: 34px;
+  width: auto;
+  max-width: 26px;
+  object-fit: cover;
+  border-radius: 3px;
+  border: 1px solid var(--border);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+  background: var(--bar-hi);
+}
+.cover-thumb[hidden] { display: none; }
+
+.title-block__text {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  line-height: 1.15;
+  overflow: hidden;
+}
+/* With a cover present, tuck the text left against it like a "now reading" chip. */
+.title-block.has-cover .title-block__text {
+  align-items: flex-start;
+  text-align: left;
+}
+.title-block__book,
+.title-block__chapter {
+  max-width: 100%;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  padding: 0 4px;
+}
+
+/* On wider (desktop) viewports the bar is roomy, so the small mobile sizes
+   read as undersized -- scale the title, chapter and cover up a notch.
+   Selectors are kept a notch more specific than the base rules so the bump
+   wins regardless of source order. */
+@media (min-width: 768px) {
+  .title-block .title-block__book { font-size: 16px; }
+  .title-block.has-chapter .title-block__text .title-block__chapter { font-size: 12.5px; }
+  .title-block .cover-thumb { height: 38px; max-width: 28px; }
+
+  /* Left-align the block and push it in so its left edge lines up with the
+     centered reading column's left margin -- (100% - col)/2 in the reader,
+     here as (50vw - col/2). The 52px subtracts the bar padding + hamburger +
+     gap that already sit to the left of this block. Clamped so it never goes
+     negative on narrower desktop widths. */
+  .title-block {
+    justify-content: flex-start;
+    padding-left: 0;
+    margin-left: max(0px, calc(50vw - var(--reading-col) / 2 - 52px));
+  }
+  .title-block__text {
+    align-items: flex-start;
+    text-align: left;
+  }
+}
+.title-block__book {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--heading);
   letter-spacing: 0.01em;
+}
+.title-block__chapter { display: none; }
+
+.title-block.has-chapter .title-block__chapter {
+  display: block;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text);
+  letter-spacing: 0.02em;
 }
 
 .topbar-right { display: flex; align-items: center; gap: 2px; }

@@ -22,7 +22,13 @@
             <path d="M4 6h16M4 12h16M4 18h16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
           </svg>
         </button>
-        <div id="book-title" class="book-title">Reader</div>
+        <div id="title-block" class="title-block">
+          <img id="cover-thumb" class="cover-thumb" alt="" hidden />
+          <div class="title-block__text">
+            <span id="book-title" class="title-block__book">Reader</span>
+            <span id="chapter-title" class="title-block__chapter"></span>
+          </div>
+        </div>
         <div class="topbar-right">
           <button id="btn-prev" class="icon-btn" aria-label="Previous chapter" title="Previous" disabled>
             <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>

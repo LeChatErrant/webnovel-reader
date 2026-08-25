@@ -38,7 +38,10 @@ async function idbSet(key, value) {
 // DOM handles
 // -------------------------------------------------------------------------
 const el = {
+  titleBlock: document.getElementById("title-block"),
+  coverThumb: document.getElementById("cover-thumb"),
   topTitle: document.getElementById("book-title"),
+  chapterTitle: document.getElementById("chapter-title"),
   btnToc: document.getElementById("btn-toc"),
   btnPrev: document.getElementById("btn-prev"),
   btnNext: document.getElementById("btn-next"),
@@ -68,6 +71,8 @@ let book = null;
 let rendition = null;
 let bookKey = null; // identifies the current book for position storage
 let flatToc = []; // [{ label, href, depth }]
+let currentHref = null; // href of the section currently in view
+let coverObjectUrl = null; // blob URL for the current cover thumbnail
 
 // -------------------------------------------------------------------------
 // Open + render a book from an ArrayBuffer
@@ -78,6 +83,20 @@ async function openBook(buffer, name, { persist = true } = {}) {
     rendition = null;
   }
   el.viewer.innerHTML = "";
+
+  // Reset the top-bar chapter label until the new book relocates.
+  currentHref = null;
+  flatToc = [];
+  updateChapterTitle(null);
+
+  // Reset the cover thumbnail; a new one is loaded below once available.
+  if (coverObjectUrl) {
+    URL.revokeObjectURL(coverObjectUrl);
+    coverObjectUrl = null;
+  }
+  el.coverThumb.hidden = true;
+  el.coverThumb.removeAttribute("src");
+  el.titleBlock.classList.remove("has-cover");
 
   book = ePub(buffer);
   bookKey = "pos:" + name;
@@ -117,16 +136,36 @@ async function openBook(buffer, name, { persist = true } = {}) {
     document.title = title;
   });
 
-  // Build the chapters drawer.
+  // Cover thumbnail in the top bar (many books have one; some don't). coverUrl
+  // resolves to a blob URL, or null when the book declares no cover.
+  const loadingBook = book;
+  book.coverUrl().then((url) => {
+    // Guard against a race where the user opened another book meanwhile.
+    if (book !== loadingBook || !url) {
+      return;
+    }
+    coverObjectUrl = url;
+    el.coverThumb.src = url;
+    el.coverThumb.hidden = false;
+    el.titleBlock.classList.add("has-cover");
+  }).catch(() => {
+    /* no cover -- leave the thumbnail hidden */
+  });
+
+  // Build the chapters drawer. The TOC may load after the first relocation,
+  // so refresh the top-bar chapter label once labels are available.
   book.loaded.navigation.then((nav) => {
     flatToc = flatten(nav.toc);
     renderToc();
+    updateChapterTitle(currentHref);
   });
 
-  // Track position: highlight current chapter + persist CFI.
+  // Track position: highlight current chapter, show it in the top bar,
+  // and persist CFI.
   rendition.on("relocated", (location) => {
-    const href = location?.start?.href;
-    highlightToc(href);
+    currentHref = location?.start?.href || null;
+    highlightToc(currentHref);
+    updateChapterTitle(currentHref);
     if (persist && location?.start?.cfi) {
       idbSet(bookKey, location.start.cfi);
     }
@@ -173,8 +212,8 @@ function baseHref(href) {
   return (href || "").split("#")[0];
 }
 
-function highlightToc(currentHref) {
-  const current = baseHref(currentHref);
+function highlightToc(href) {
+  const current = baseHref(href);
   let matchBtn = null;
   el.tocList.querySelectorAll("button").forEach((btn) => {
     const isMatch = baseHref(btn.dataset.href) === current;
@@ -186,6 +225,28 @@ function highlightToc(currentHref) {
   if (matchBtn) {
     matchBtn.scrollIntoView({ block: "nearest" });
   }
+}
+
+// The chapter label shown in the top bar. When a section has no matching TOC
+// entry (e.g. a sub-section between chapter markers), keep the last known
+// label rather than blanking, so the bar stays stable while scrolling.
+function chapterLabelFor(href) {
+  const current = baseHref(href);
+  for (const entry of flatToc) {
+    if (baseHref(entry.href) === current) {
+      return entry.label || "";
+    }
+  }
+  return null;
+}
+
+function updateChapterTitle(href) {
+  const label = href ? chapterLabelFor(href) : "";
+  if (label === null) {
+    return; // no match -- leave the current label in place
+  }
+  el.chapterTitle.textContent = label;
+  el.titleBlock.classList.toggle("has-chapter", label !== "");
 }
 
 // -------------------------------------------------------------------------
