@@ -141,8 +141,35 @@ function progressBar(pct, variant) {
 // -------------------------------------------------------------------------
 // Derived reading state.
 // -------------------------------------------------------------------------
+// Web-novel epubs bundle front matter ahead of the real chapters: the same
+// metadata/synopsis page we now render as our own info page, plus an in-book
+// contents page that duplicates our chapter drawer. We hide these from the
+// reader flow, the chapter menu and the chapter counts/numbers.
+const FRONT_MATTER_RE =
+  /^(informations?|table of contents|contents|toc|cover|title\s*page|copyright|colophon)$/i;
+const isFrontMatter = (label) => FRONT_MATTER_RE.test((label || "").trim());
+// Never hide everything: if a whole TOC somehow matched, fall back to the
+// original so the reader is never left empty.
+function readableChapters(entries) {
+  const kept = (entries || []).filter((e) => !isFrontMatter(e.label));
+  return kept.length ? kept : entries || [];
+}
+const frontMatterCount = (book) => (book?.chapters || []).filter((e) => isFrontMatter(e.label)).length;
+
+// Count the readable chapters, not spine items: the spine can carry extra
+// front matter (e.g. an untracked cover page) the TOC never lists, so the
+// readable TOC is the honest basis for counts and numbering.
 function chapterCount(book) {
-  return book.spineCount || book.chapters?.length || 1;
+  return readableChapters(book.chapters || []).length || book.spineCount || 1;
+}
+// Which chapter (1-based, within its volume) a saved position sits on, counted
+// over the readable TOC by label so leading front matter never inflates it.
+function chapterOrdinalFor(book, p) {
+  if (!p) return 1;
+  const readable = readableChapters(book.chapters || []);
+  const i = readable.findIndex((e) => e.label && e.label === p.chapterLabel);
+  if (i >= 0) return i + 1;
+  return Math.max(1, (p.chapterIndex ?? 0) + 1 - frontMatterCount(book));
 }
 // The furthest chapter ever reached in this book. Progress is measured from
 // here (not the current resume point), so jumping *back* into an earlier
@@ -157,7 +184,10 @@ function bookPercent(book) {
   const p = progressMap[book.id];
   if (p?.finished) return 100;
   if (!p) return 0;
-  return Math.min(100, Math.round(((furthestIndex(book) + 1) / chapterCount(book)) * 100));
+  // furthestIndex is a spine index, so measure against the spine total (which
+  // includes front matter) to keep numerator and denominator on the same basis.
+  const total = book.spineCount || chapterCount(book);
+  return Math.min(100, Math.round(((furthestIndex(book) + 1) / total) * 100));
 }
 function bookIsStarted(book) {
   return !!progressMap[book.id];
@@ -237,7 +267,7 @@ function continueTarget() {
 // "Vol. 2 · Chapter 214 · The Sanctuary"
 function continueSubtitle(book) {
   const p = progressMap[book.id];
-  const abs = (p ? p.chapterIndex : 0) + 1 + volumeChapterOffset(book);
+  const abs = chapterOrdinalFor(book, p) + volumeChapterOffset(book);
   const parts = [];
   if (book.seriesId && book.volumeIndex) parts.push("Vol. " + book.volumeIndex);
   parts.push("Chapter " + abs);
@@ -721,10 +751,10 @@ function continueInfo(m) {
   if (bookPercent(t) >= 100) return { label: "Read again", target: t };
   if (!p) return { label: "Start reading", target: t };
   if (m.kind === "series") {
-    const abs = (p.chapterIndex ?? 0) + 1 + volumeChapterOffset(t);
+    const abs = chapterOrdinalFor(t, p) + volumeChapterOffset(t);
     return { label: `Continue vol. ${volumeNumber(m.series, t)} · ch. ${abs}`, target: t };
   }
-  return { label: `Continue ch. ${(p.chapterIndex ?? 0) + 1}`, target: t };
+  return { label: `Continue ch. ${chapterOrdinalFor(t, p)}`, target: t };
 }
 
 function renderInfo(kind, id) {
@@ -855,7 +885,7 @@ function volumeRow(s, book, start, end, cur) {
   const p = progressMap[book.id];
   let statusText;
   if (pct >= 100) statusText = "finished";
-  else if (p) statusText = "reading ch. " + (p.chapterIndex + 1 + start - 1);
+  else if (p) statusText = "reading ch. " + (chapterOrdinalFor(book, p) + start - 1);
   else statusText = "not started";
   const title = "Vol. " + volumeNumber(s, book) + (stripVolume(displayTitle(book)) ? " · " + stripVolume(displayTitle(book)) : "");
   const row = h(
@@ -1170,7 +1200,7 @@ function showVolumeSheet(s, book, start, end) {
   const volNum = volumeNumber(s, book);
   const p = progressMap[book.id];
   const pct = bookPercent(book);
-  const absCh = (p ? p.chapterIndex + 1 : 1) + volumeChapterOffset(book);
+  const absCh = (p ? chapterOrdinalFor(book, p) : 1) + volumeChapterOffset(book);
   const volTitle = "Vol. " + volNum + (stripVolume(displayTitle(book)) ? " · " + stripVolume(displayTitle(book)) : "");
   let statusLine;
   if (pct >= 100) statusLine = "Finished · 100 %";
@@ -1520,7 +1550,7 @@ async function renderReader(lib) {
   // Populate the drawer (current book + chapters) immediately from stored
   // metadata, so the menu is usable the moment it opens — independent of how
   // long epub.js takes to lay out the first chapter.
-  flatToc = (lib.chapters || []).slice();
+  flatToc = readableChapters(lib.chapters || []);
   renderToc();
   updateDrawerBook();
 
@@ -1541,12 +1571,14 @@ async function renderReader(lib) {
   el.btnPrev.disabled = false;
   el.btnNext.disabled = false;
 
+  // Fresh opens start at the first real chapter, skipping the epub's own
+  // front matter (info/contents pages) that our chrome already covers.
   const saved = progressMap[lib.id]?.cfi;
-  rendition.display(saved || undefined);
+  rendition.display(saved || flatToc[0]?.href || undefined);
 
   // Refine the chapter list once the live navigation resolves (accurate hrefs).
   book.loaded.navigation.then((nav) => {
-    flatToc = flatten(nav.toc);
+    flatToc = readableChapters(flatten(nav.toc));
     renderToc();
     updateChapterTitle(currentHref);
   });
@@ -1606,7 +1638,7 @@ function updateDrawerBook() {
   };
 
   const p = progressMap[lib.id];
-  const n = (p ? p.chapterIndex + 1 : 1) + volumeChapterOffset(lib);
+  const n = (p ? chapterOrdinalFor(lib, p) : 1) + volumeChapterOffset(lib);
   const total = chapterCount(lib) + volumeChapterOffset(lib);
   el.drawerBookSub.textContent = `${n} of ${total.toLocaleString()} · ${bookPercent(lib)} %`;
 
