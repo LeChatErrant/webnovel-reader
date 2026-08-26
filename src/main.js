@@ -131,7 +131,7 @@ function coverUrlFor(book) {
 }
 function coverNode(book, cls = "cover") {
   const url = book && coverUrlFor(book);
-  if (url) return h("div", { class: cls }, h("img", { class: "cover__img", src: url, alt: "", loading: "lazy" }));
+  if (url) return h("div", { class: cls }, h("img", { class: "cover__img", src: url, alt: "", loading: "lazy", draggable: "false" }));
   return h("div", { class: cls + " cover--ph" });
 }
 function progressBar(pct, variant) {
@@ -1287,6 +1287,13 @@ function attachLongPress(node, { onLongPress, onTap, canStart = () => true, dela
   node.addEventListener("pointerup", clear);
   node.addEventListener("pointercancel", clear);
   node.addEventListener("pointerleave", clear);
+  // On Android a long-press fires `contextmenu` (the "Download image / open in
+  // new tab" popup on covers), which collides with our own hold-to-select.
+  // iOS's `-webkit-touch-callout: none` handles the equivalent there; this is
+  // the cross-browser counterpart. Suppress it whenever a press could start.
+  node.addEventListener("contextmenu", (e) => {
+    if (canStart() || longPressed) e.preventDefault();
+  });
   node.addEventListener("click", (e) => {
     if (longPressed) {
       e.preventDefault();
@@ -1834,38 +1841,23 @@ function openSeries(id) {
 window.addEventListener("popstate", (e) => applyState(e.state));
 
 // =========================================================================
-// Install (Add to Home Screen) — unchanged behavior from the single-book app.
+// Install (Add to Home Screen). The only entry point is the persistent
+// footnote pinned to the bottom of the library — no intrusive nudge bar.
 // =========================================================================
 let deferredInstallPrompt = null;
-const INSTALL_DISMISSED = "installDismissed";
 const isStandalone = () =>
   window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone === true;
-const isIOS = () => /iphone|ipad|ipod/i.test(navigator.userAgent) && !window.MSStream;
 
-function showInstallBar() {
-  if (localStorage.getItem(INSTALL_DISMISSED) === "1") return;
-  el.installBar.hidden = false;
-  requestAnimationFrame(() => el.installBar.classList.add("show"));
-}
-function hideInstallBar() {
-  el.installBar.classList.remove("show");
-  el.installBar.hidden = true;
-}
-function dismissInstallBar() {
-  localStorage.setItem(INSTALL_DISMISSED, "1");
-  el.installBar.classList.remove("show");
-  const onEnd = () => {
-    el.installBar.hidden = true;
-    el.installBar.removeEventListener("transitionend", onEnd);
-  };
-  el.installBar.addEventListener("transitionend", onEnd);
+// Show the footnote whenever the app isn't already installed.
+function refreshInstallNote() {
+  el.installNote.hidden = isStandalone();
 }
 async function handleInstallClick() {
   if (deferredInstallPrompt) {
     deferredInstallPrompt.prompt();
     const { outcome } = await deferredInstallPrompt.userChoice;
     deferredInstallPrompt = null;
-    if (outcome === "accepted") hideInstallBar();
+    if (outcome === "accepted") el.installNote.hidden = true;
     return;
   }
   el.installSheet.hidden = false;
@@ -1873,11 +1865,10 @@ async function handleInstallClick() {
 window.addEventListener("beforeinstallprompt", (e) => {
   e.preventDefault();
   deferredInstallPrompt = e;
-  if (!isStandalone()) showInstallBar();
 });
 window.addEventListener("appinstalled", () => {
   deferredInstallPrompt = null;
-  hideInstallBar();
+  el.installNote.hidden = true;
   el.installSheet.hidden = true;
 });
 
@@ -1954,9 +1945,7 @@ function collectRefs() {
     actionScrim: "action-scrim",
     actionCard: "action-card",
     editor: "editor",
-    installBar: "install-bar",
-    installBarAction: "install-bar-action",
-    installBarDismiss: "install-bar-dismiss",
+    installNote: "install-note",
     installSheet: "install-sheet",
     installScrim: "install-scrim",
     installSheetClose: "install-sheet-close",
@@ -1998,8 +1987,7 @@ function wireEvents() {
   el.volumeScrim.addEventListener("click", hideVolumeSheet);
   el.actionScrim.addEventListener("click", hideActionSheet);
 
-  el.installBarAction.addEventListener("click", handleInstallClick);
-  el.installBarDismiss.addEventListener("click", dismissInstallBar);
+  el.installNote.addEventListener("click", handleInstallClick);
   el.installScrim.addEventListener("click", () => (el.installSheet.hidden = true));
   el.installSheetClose.addEventListener("click", () => (el.installSheet.hidden = true));
 
@@ -2071,5 +2059,5 @@ async function migrateLegacy() {
     console.warn("State load failed:", err);
   }
   go({ route: "library" }, false);
-  if (!isStandalone() && isIOS()) showInstallBar();
+  refreshInstallNote();
 })();

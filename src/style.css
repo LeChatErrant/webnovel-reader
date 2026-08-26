@@ -98,7 +98,21 @@ html, body {
   background: var(--surface-alt);
 }
 .cover--ph { background: var(--cover-ph); }
-.cover__img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; }
+.cover__img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  /* Covers live inside long-press targets — block the OS image gestures
+     (drag-to-save, Android's long-press "download image" menu) that would
+     otherwise fight our hold-to-select. */
+  -webkit-user-drag: none;
+  -webkit-touch-callout: none;
+  user-select: none;
+  pointer-events: none;
+}
 
 .pbar { position: relative; }
 .pbar--cover { position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: rgba(0, 0, 0, 0.4); }
@@ -1042,68 +1056,31 @@ html, body {
 }
 
 /* =========================================================================
-   Install nudge (slim footer)
+   Install footnote — persistent, unobtrusive line pinned to the bottom of
+   the library. It's a flex sibling of .lib-body, so it stays at the very
+   bottom of the screen while the book list scrolls above it.
    ====================================================================== */
-.install-bar {
-  position: fixed;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  z-index: 45;
+.install-note {
+  appearance: none;
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
-  gap: 10px;
+  justify-content: center;
+  gap: 7px;
+  width: 100%;
   padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
-  padding-left: max(12px, env(safe-area-inset-left));
-  padding-right: max(12px, env(safe-area-inset-right));
-  background: color-mix(in srgb, var(--surface) 94%, transparent);
-  backdrop-filter: saturate(120%) blur(8px);
+  border: 0;
   border-top: 1px solid var(--border);
-  transform: translateY(100%);
-  transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1);
-}
-.install-bar.show { transform: translateY(0); }
-.install-bar[hidden] { display: none; }
-.install-bar__icon { color: var(--text-muted); flex: 0 0 auto; }
-.install-bar__text {
-  flex: 1 1 auto;
-  min-width: 0;
-  font-size: 13.5px;
-  color: var(--text-secondary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.install-bar__action {
-  appearance: none;
-  flex: 0 0 auto;
-  border: 0;
-  background: var(--pill);
-  color: var(--text-primary);
-  font-weight: 600;
-  font-size: 13.5px;
-  padding: 7px 16px;
-  border-radius: 9px;
-  cursor: pointer;
-}
-.install-bar__action:hover { background: #333b4a; }
-.install-bar__dismiss {
-  appearance: none;
-  flex: 0 0 auto;
-  border: 0;
   background: transparent;
   color: var(--text-dim);
-  width: 32px;
-  height: 32px;
-  border-radius: 8px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+  font-size: 12.5px;
   cursor: pointer;
 }
-.install-bar__dismiss:hover { background: var(--row-current); color: var(--text-secondary); }
+.install-note[hidden] { display: none; }
+.install-note:hover { color: var(--text-secondary); }
+.install-note svg { flex: 0 0 auto; }
 
 @media (prefers-reduced-motion: reduce) {
-  .drawer, .scrim, .install-bar { transition: none; }
+  .drawer, .scrim { transition: none; }
   .sheet-card { animation: none; }
 }
