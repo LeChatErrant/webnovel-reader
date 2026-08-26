@@ -52,6 +52,13 @@
       <section id="info-screen" class="screen info-screen" hidden></section>
 
       <!-- =====================================================================
+           CHAPTERS screen (8a) — a pushed, searchable, virtualised chapter
+           list. Reached from the info page, the volume sheet and the reader
+           drawer. Populated by src/main.js.
+           ================================================================== -->
+      <section id="chapters-screen" class="screen chapters-screen" hidden></section>
+
+      <!-- =====================================================================
            READER — chrome variant 1c. Top bar: burger · title · ‹ · ›.
            No home button here; "My library" lives in the drawer.
            ================================================================== -->
@@ -96,6 +103,7 @@
         <div id="drawer-volumes" class="drawer-volumes" hidden></div>
         <div class="drawer-label">Chapters</div>
         <ul id="toc-list" class="toc-list"></ul>
+        <button id="drawer-seeall" class="drawer-seeall" type="button">See all chapters</button>
       </nav>
 
       <!-- Reading surface -->

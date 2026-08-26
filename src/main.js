@@ -117,6 +117,10 @@ const ICON = {
   more: '<svg viewBox="0 0 24 24" width="20" height="20"><circle cx="5" cy="12" r="1.6" fill="currentColor"/><circle cx="12" cy="12" r="1.6" fill="currentColor"/><circle cx="19" cy="12" r="1.6" fill="currentColor"/></svg>',
   close: '<svg viewBox="0 0 24 24" width="20" height="20"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
   handle: '<svg viewBox="0 0 24 24" width="18" height="18"><circle cx="9" cy="6" r="1.4" fill="currentColor"/><circle cx="15" cy="6" r="1.4" fill="currentColor"/><circle cx="9" cy="12" r="1.4" fill="currentColor"/><circle cx="15" cy="12" r="1.4" fill="currentColor"/><circle cx="9" cy="18" r="1.4" fill="currentColor"/><circle cx="15" cy="18" r="1.4" fill="currentColor"/></svg>',
+  sort: '<svg viewBox="0 0 24 24" width="16" height="16"><path d="M7 4v16M7 20l-3-3M7 20l3-3M17 20V4M17 4l-3 3M17 4l3 3" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  search: '<svg viewBox="0 0 24 24" width="15" height="15"><circle cx="11" cy="11" r="6.5" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M16 16l4 4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>',
+  check: '<svg viewBox="0 0 24 24" width="14" height="14"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  chevron: '<svg viewBox="0 0 24 24" width="16" height="16"><path d="M9 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>',
 };
 
 // -------------------------------------------------------------------------
@@ -847,10 +851,25 @@ function renderInfo(kind, id) {
   const size = formatBytes(m.byteSize);
   rows.push(["On this device", `${m.fileCount} file${m.fileCount === 1 ? "" : "s"}${size ? " · " + size : ""}`]);
   const table = h("div", { class: "info-table" });
+  // The Chapters row is one of the three entry points to the Chapters screen —
+  // it is tappable and carries a chevron; the rest are plain display rows.
+  const chapterVolId = m.kind === "series" && m.currentVolume ? m.currentVolume.id : null;
+  const openChaptersFromInfo = () => openChapters(m.kind, m.id, { volId: chapterVolId });
   for (const [label, value] of rows) {
-    table.append(
-      h("div", { class: "info-trow" }, h("span", { class: "info-trow__k" }, label), h("span", { class: "info-trow__v" }, value))
-    );
+    if (label === "Chapters") {
+      table.append(
+        h(
+          "div",
+          { class: "info-trow info-trow--link", role: "button", tabindex: "0", onclick: openChaptersFromInfo, onkeydown: (e) => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), openChaptersFromInfo()) },
+          h("span", { class: "info-trow__k" }, label),
+          h("span", { class: "info-trow__v info-trow__v--nav" }, value, h("span", { class: "info-trow__chev" }, svg(ICON.chevron)))
+        )
+      );
+    } else {
+      table.append(
+        h("div", { class: "info-trow" }, h("span", { class: "info-trow__k" }, label), h("span", { class: "info-trow__v" }, value))
+      );
+    }
   }
   content.append(table);
 
@@ -1236,7 +1255,7 @@ function showVolumeSheet(s, book, start, end) {
       "div",
       { class: "vsheet__actions" },
       h("button", { class: "pill-btn vsheet__continue", onclick: () => { hideVolumeSheet(); openBook(book.id); } }, continueLabel),
-      h("button", { class: "outline-pill", onclick: () => { hideVolumeSheet(); openBook(book.id, { withDrawer: true }); } }, "Chapters")
+      h("button", { class: "outline-pill", onclick: () => { hideVolumeSheet(); openChapters("series", s.id, { volId: book.id }); } }, "Chapters")
     ),
     h(
       "div",
@@ -1250,6 +1269,322 @@ function showVolumeSheet(s, book, start, end) {
     )
   );
   el.volumeSheet.hidden = false;
+}
+
+// =========================================================================
+// CHAPTERS screen (design 8a) — a pushed, searchable list of every chapter in
+// a book or a whole series. Three entry points (info page, volume sheet,
+// reader drawer) all land on the same screen; it opens scrolled to the
+// chapter you are on. Search, sort and volume filter are screen-local; the
+// sort direction persists per book.
+// =========================================================================
+let chQuery = ""; // current search string (screen-local)
+let chVolFilter = null; // volume id to filter to, or null for the whole story
+let chBackObserver = null; // watches the current row to toggle the "Back to ch." pill
+let chEls = null; // live DOM refs while the screen is mounted
+
+const chSortKey = (kind, id) => kind + ":" + id;
+const chSortDir = (kind, id) => (ui.chapterSort && ui.chapterSort[chSortKey(kind, id)]) || "asc";
+function setChSortDir(kind, id, dir) {
+  ui.chapterSort = ui.chapterSort || {};
+  ui.chapterSort[chSortKey(kind, id)] = dir;
+  saveUi();
+}
+
+// Build the flat, absolutely-numbered chapter list for a book or a whole
+// series, tagging each row read / unread / current. Chapters before the
+// reading position are read; the one you are on is current; the rest unread.
+function chaptersModel(kind, id) {
+  if (kind === "series") {
+    const s = seriesById(id);
+    if (!s) return null;
+    const vols = seriesVolumes(s);
+    const cur = currentVolume(s);
+    const curP = cur ? progressMap[cur.id] : null;
+    const curLocal = cur && curP ? chapterOrdinalFor(cur, curP) - 1 : -1;
+    const items = [];
+    for (const vol of vols) {
+      const chs = readableChapters(vol.chapters || []);
+      const offset = volumeChapterOffset(vol);
+      const finished = bookPercent(vol) >= 100;
+      const started = bookIsStarted(vol);
+      chs.forEach((e, i) => {
+        let state;
+        if (cur && vol.id === cur.id && !finished) state = i < curLocal ? "read" : i === curLocal ? "current" : "unread";
+        else if (finished) state = "read";
+        else if (!started) state = "unread";
+        else state = i < curLocal ? "read" : "unread";
+        items.push({ absNum: offset + i + 1, label: e.label, href: e.href, bookId: vol.id, localIndex: i, state });
+      });
+    }
+    const curItem = items.find((it) => it.state === "current");
+    return {
+      kind, id, series: s, vols, book: null, title: s.name, items,
+      currentAbs: curItem ? curItem.absNum : null,
+      currentPercent: cur ? progressMap[cur.id]?.chapterPercent : undefined,
+    };
+  }
+  const b = bookById(id);
+  if (!b) return null;
+  const chs = readableChapters(b.chapters || []);
+  const p = progressMap[b.id];
+  const finished = bookPercent(b) >= 100;
+  const started = bookIsStarted(b);
+  const curLocal = p ? chapterOrdinalFor(b, p) - 1 : -1;
+  const items = chs.map((e, i) => {
+    let state;
+    if (finished) state = "read";
+    else if (!started) state = "unread";
+    else state = i < curLocal ? "read" : i === curLocal ? "current" : "unread";
+    return { absNum: i + 1, label: e.label, href: e.href, bookId: b.id, localIndex: i, state };
+  });
+  const curItem = items.find((it) => it.state === "current");
+  return {
+    kind, id, series: null, vols: null, book: b, title: displayTitle(b), items,
+    currentAbs: curItem ? curItem.absNum : null,
+    currentPercent: progressMap[b.id]?.chapterPercent,
+  };
+}
+
+// Push the Chapters screen. `volId` presets the volume filter (from a volume
+// sheet or a series' current volume); null shows the whole story.
+function openChapters(kind, id, { volId = null } = {}) {
+  go({ route: "chapters", kind, id, volId });
+}
+
+// "Shadow Slave · vol. 2" — the book, then the active volume filter.
+function chContextLine(m) {
+  if (m.kind === "series" && chVolFilter) {
+    const v = m.vols.find((x) => x.id === chVolFilter);
+    return m.title + (v ? " · vol. " + volumeNumber(m.series, v) : "");
+  }
+  return m.title;
+}
+
+function renderChapters(kind, id, volId) {
+  const m = chaptersModel(kind, id);
+  const root = el.chaptersScreen;
+  root.innerHTML = "";
+  if (!m) {
+    go({ route: "library" });
+    return;
+  }
+  if (volId !== undefined) chVolFilter = volId;
+  chQuery = "";
+
+  // Bar — back · title + context · sort toggle.
+  const context = h("div", { class: "ch-bar__context" }, chContextLine(m));
+  const sortBtn = h(
+    "button",
+    {
+      class: "ch-bar__icon",
+      "aria-label": "Reverse chapter order",
+      onclick: () => {
+        setChSortDir(kind, id, chSortDir(kind, id) === "asc" ? "desc" : "asc");
+        updateChapterList(m);
+      },
+    },
+    svg(ICON.sort)
+  );
+  root.append(
+    h(
+      "div",
+      { class: "ch-bar" },
+      h("button", { class: "ch-bar__icon", "aria-label": "Back", onclick: () => history.back() }, svg(ICON.back)),
+      h("div", { class: "ch-bar__titles" }, h("div", { class: "ch-bar__title" }, "Chapters"), context),
+      sortBtn
+    )
+  );
+
+  // Search — matches title and number; sticky under the bar.
+  const searchInput = h("input", { class: "ch-search__input", type: "search", placeholder: "Search title or number", autocomplete: "off" });
+  searchInput.addEventListener("input", () => {
+    chQuery = searchInput.value.trim();
+    updateChapterList(m);
+  });
+  root.append(h("div", { class: "ch-search" }, h("div", { class: "ch-search__box" }, h("span", { class: "ch-search__icon" }, svg(ICON.search)), searchInput)));
+
+  // Volume chips (series only).
+  let chips = null;
+  if (m.kind === "series" && m.vols.length > 1) {
+    chips = h("div", { class: "ch-chips" });
+    root.append(chips);
+  }
+
+  const list = h("div", { class: "ch-list" });
+  const backWrap = h("div", { class: "ch-backpill-wrap" });
+  root.append(list, backWrap);
+
+  chEls = { list, backWrap, chips, context, model: m };
+  if (chips) renderChips(m);
+  updateChapterList(m, true);
+}
+
+// Volume filter chips — active chip first, then the rest in volume order.
+// Tapping the active chip clears the filter (shows the whole story).
+function renderChips(m) {
+  const container = chEls.chips;
+  container.innerHTML = "";
+  let ordered = m.vols;
+  if (chVolFilter) {
+    const active = m.vols.find((v) => v.id === chVolFilter);
+    if (active) ordered = [active, ...m.vols.filter((v) => v.id !== chVolFilter)];
+  }
+  for (const v of ordered) {
+    const on = v.id === chVolFilter;
+    container.append(
+      h(
+        "button",
+        {
+          class: "ch-chip" + (on ? " ch-chip--on" : ""),
+          onclick: () => {
+            chVolFilter = on ? null : v.id;
+            renderChips(m);
+            chEls.context.textContent = chContextLine(m);
+            updateChapterList(m);
+          },
+        },
+        "Vol. " + volumeNumber(m.series, v)
+      )
+    );
+  }
+}
+
+function chFilteredItems(m) {
+  let items = m.items;
+  if (chVolFilter) items = items.filter((it) => it.bookId === chVolFilter);
+  if (chQuery) {
+    const q = chQuery.toLowerCase();
+    items = items.filter((it) => (it.label || "").toLowerCase().includes(q) || String(it.absNum).includes(q));
+  }
+  return items;
+}
+
+function updateChapterList(m, scrollToCurrent = false) {
+  const list = chEls.list;
+  list.innerHTML = "";
+  const items = chFilteredItems(m);
+
+  if (!items.length) {
+    list.append(h("div", { class: "ch-empty" }, `No chapters match “${chQuery}”.`));
+    setupBackPill(m);
+    return;
+  }
+
+  const dir = chSortDir(m.kind, m.id);
+  const filterCount = (chVolFilter ? m.items.filter((it) => it.bookId === chVolFilter) : m.items).length;
+
+  if (chQuery) {
+    // Search results are a flat list — no range headers over a sparse set.
+    const ordered = dir === "desc" ? [...items].reverse() : items;
+    for (const it of ordered) list.append(chRow(m, it));
+  } else {
+    // Range headers every 50 chapters (by absolute number), sticky per block.
+    const blocks = new Map();
+    for (const it of items) {
+      const b = Math.floor((it.absNum - 1) / 50);
+      if (!blocks.has(b)) blocks.set(b, []);
+      blocks.get(b).push(it);
+    }
+    let keys = [...blocks.keys()].sort((a, b) => a - b);
+    if (dir === "desc") keys.reverse();
+    for (const bk of keys) {
+      const start = bk * 50 + 1;
+      const end = bk * 50 + 50;
+      list.append(
+        h(
+          "div",
+          { class: "ch-range" },
+          h("span", { class: "ch-range__label" }, `Ch. ${start}–${end}`),
+          h("span", { class: "ch-range__total" }, `${filterCount.toLocaleString()} chapter${filterCount === 1 ? "" : "s"}`)
+        )
+      );
+      let rows = blocks.get(bk);
+      if (dir === "desc") rows = [...rows].reverse();
+      for (const it of rows) list.append(chRow(m, it));
+    }
+  }
+
+  setupBackPill(m);
+  if (scrollToCurrent) requestAnimationFrame(() => scrollToCurrentRow());
+}
+
+function chRow(m, it) {
+  const cls = "ch-row ch-row--" + it.state;
+  if (it.state === "current") {
+    const pct = m.currentPercent;
+    return h(
+      "button",
+      { class: cls, dataset: { current: "1" }, onclick: () => chOpen(it) },
+      h("span", { class: "ch-row__num" }, String(it.absNum)),
+      h(
+        "span",
+        { class: "ch-row__title-wrap" },
+        h("div", { class: "ch-row__title" }, it.label || "Untitled"),
+        h("div", { class: "ch-row__sub" }, pct != null ? `Reading · ${pct} % through` : "Reading")
+      )
+    );
+  }
+  return h(
+    "button",
+    { class: cls, onclick: () => chOpen(it) },
+    h("span", { class: "ch-row__num" }, String(it.absNum)),
+    h("span", { class: "ch-row__title" }, it.label || "Untitled"),
+    it.state === "read" ? h("span", { class: "ch-row__check" }, svg(ICON.check)) : null
+  );
+}
+
+// Tapping a row opens the reader at that chapter — the saved offset for the
+// current chapter, the top for any other.
+function chOpen(it) {
+  if (it.state === "current") openBook(it.bookId);
+  else openBook(it.bookId, { startHref: it.href });
+}
+
+function scrollToCurrentRow() {
+  const cur = chEls?.list.querySelector("[data-current]");
+  if (cur) cur.scrollIntoView({ block: "center" });
+}
+
+// The floating "Back to ch. N" pill: shown only while the current row is
+// scrolled out of view; its arrow points the way it will scroll.
+function setupBackPill(m) {
+  if (chBackObserver) {
+    chBackObserver.disconnect();
+    chBackObserver = null;
+  }
+  const wrap = chEls.backWrap;
+  wrap.innerHTML = "";
+  wrap.classList.remove("show");
+  if (m.currentAbs == null) return;
+  const cur = chEls.list.querySelector("[data-current]");
+  if (!cur) return; // current chapter filtered out — no pill
+  const pill = h("button", { class: "ch-backpill", onclick: () => cur.scrollIntoView({ behavior: "smooth", block: "center" }) }, `↓ Back to ch. ${m.currentAbs}`);
+  wrap.append(pill);
+  chBackObserver = new IntersectionObserver(
+    (entries) => {
+      const e = entries[0];
+      if (e.isIntersecting) {
+        wrap.classList.remove("show");
+      } else {
+        const above = e.boundingClientRect.top < chEls.list.getBoundingClientRect().top;
+        pill.textContent = `${above ? "↑" : "↓"} Back to ch. ${m.currentAbs}`;
+        wrap.classList.add("show");
+      }
+    },
+    { root: chEls.list, threshold: 0 }
+  );
+  chBackObserver.observe(cur);
+}
+
+function teardownChapters() {
+  if (chBackObserver) {
+    chBackObserver.disconnect();
+    chBackObserver = null;
+  }
+  chEls = null;
+  chQuery = "";
+  chVolFilter = null;
 }
 
 // =========================================================================
@@ -1527,16 +1862,16 @@ let currentBook = null; // the library book being read
 let flatToc = [];
 let currentHref = null;
 
-async function openBook(id, { withDrawer = false } = {}) {
+async function openBook(id, { withDrawer = false, startHref = null } = {}) {
   const lib = bookById(id);
   if (!lib) return;
   currentBook = lib;
   go({ route: "reader", id }, true);
-  await renderReader(lib);
+  await renderReader(lib, startHref);
   if (withDrawer) openDrawer();
 }
 
-async function renderReader(lib) {
+async function renderReader(lib, startHref = null) {
   if (rendition) {
     rendition.destroy();
     rendition = null;
@@ -1564,6 +1899,11 @@ async function renderReader(lib) {
     spread: "none",
     allowScriptedContent: false,
   });
+  // The full reading theme is an external stylesheet, fetched per view — which
+  // leaves a brief white flash on each chapter change while it loads. Inject
+  // the critical dark background inline (applied the instant the view is
+  // created) so the flash never shows.
+  rendition.themes.default({ "html, body": { background: "#1f2129 !important" } });
   rendition.themes.register("webnovel", "./reader-theme.css");
   rendition.themes.select("webnovel");
   rendition.hooks.content.register(injectChapterNav);
@@ -1571,10 +1911,11 @@ async function renderReader(lib) {
   el.btnPrev.disabled = false;
   el.btnNext.disabled = false;
 
-  // Fresh opens start at the first real chapter, skipping the epub's own
-  // front matter (info/contents pages) that our chrome already covers.
+  // A chapter tapped in the Chapters screen wins; otherwise resume the saved
+  // position, falling back to the first real chapter (skipping the epub's own
+  // front matter that our chrome already covers).
   const saved = progressMap[lib.id]?.cfi;
-  rendition.display(saved || flatToc[0]?.href || undefined);
+  rendition.display(startHref || saved || flatToc[0]?.href || undefined);
 
   // Refine the chapter list once the live navigation resolves (accurate hrefs).
   book.loaded.navigation.then((nav) => {
@@ -1594,12 +1935,18 @@ async function renderReader(lib) {
     // a book is finished it stays finished even if you reopen an early chapter.
     const maxChapterIndex = Math.max(prev?.maxChapterIndex ?? -1, idx);
     const finished = prev?.finished || (total > 0 && maxChapterIndex >= total - 1);
+    // Best-effort progress *within* the current chapter, for the Chapters
+    // screen's "Reading · N % through" line. Not all layouts expose it.
+    const disp = location?.start?.displayed;
+    const chapterPercent =
+      disp && disp.total ? Math.min(100, Math.max(0, Math.round((disp.page / disp.total) * 100))) : prev?.chapterPercent;
     putProgress({
       bookId: lib.id,
       cfi: location?.start?.cfi || null,
       chapterIndex: idx,
       maxChapterIndex,
       chapterLabel: chapterLabelFor(currentHref) || prev?.chapterLabel || "",
+      chapterPercent,
       finished,
       updatedAt: Date.now(),
     });
@@ -1787,6 +2134,7 @@ function openDrawer() {
   requestAnimationFrame(() => el.scrim.classList.add("show"));
 }
 function closeDrawer() {
+  if (!el.drawer.classList.contains("open")) return; // idempotent
   el.drawer.classList.remove("open");
   el.scrim.classList.remove("show");
   const onEnd = () => {
@@ -1810,11 +2158,13 @@ function setRouteChrome(route) {
     }
   }
   if (route !== "library" && selection) exitSelection();
+  if (route !== "chapters") teardownChapters();
 }
 
 function renderCurrentRoute() {
   const route = document.getElementById("app").dataset.route;
   if (route === "info" && currentInfo) renderInfo(currentInfo.kind, currentInfo.id);
+  else if (route === "chapters") return; // the chapters screen manages its own updates
   else renderLibrary();
 }
 
@@ -1837,6 +2187,10 @@ async function applyState(state) {
     currentInfo = { kind: s.kind || "series", id: s.id };
     setRouteChrome("info");
     renderInfo(currentInfo.kind, currentInfo.id);
+  } else if (s.route === "chapters" && s.id) {
+    currentInfo = null;
+    setRouteChrome("chapters");
+    renderChapters(s.kind || "book", s.id, s.volId);
   } else {
     currentInfo = null;
     setRouteChrome("library");
@@ -1853,6 +2207,10 @@ function go(state, push = true) {
     currentInfo = { kind: state.kind || "series", id: state.id };
     setRouteChrome("info");
     renderInfo(currentInfo.kind, currentInfo.id);
+  } else if (state.route === "chapters" && state.id) {
+    currentInfo = null;
+    setRouteChrome("chapters");
+    renderChapters(state.kind || "book", state.id, state.volId);
   } else {
     currentInfo = null;
     setRouteChrome("library");
@@ -1931,6 +2289,7 @@ function collectRefs() {
     libSearchRow: "lib-search-row",
     libSearchInput: "lib-search-input",
     infoScreen: "info-screen",
+    chaptersScreen: "chapters-screen",
     topTitle: "book-title",
     chapterTitle: "chapter-title",
     titleBlock: "title-block",
@@ -1944,6 +2303,7 @@ function collectRefs() {
     drawerBookTitle: "drawer-book-title",
     drawerBookSub: "drawer-book-sub",
     drawerVolumes: "drawer-volumes",
+    drawerSeeall: "drawer-seeall",
     scrim: "scrim",
     tocList: "toc-list",
     viewer: "viewer",
@@ -2003,10 +2363,25 @@ function wireEvents() {
   });
 
   el.btnToc.addEventListener("click", openDrawer);
+  // Close on a tap outside the drawer. A synthetic `click` on the scrim is
+  // unreliable on Android when it overlays the epub iframe (the tap can be
+  // swallowed), so dismiss on `pointerdown`, with `click` kept for mouse.
+  el.scrim.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    closeDrawer();
+  });
   el.scrim.addEventListener("click", closeDrawer);
   el.drawerHome.addEventListener("click", () => {
     closeDrawer();
     go({ route: "library" });
+  });
+  // "See all chapters" — pushes the full Chapters screen (8a), closing the
+  // drawer. A book in a series opens the whole story with its volume preset.
+  el.drawerSeeall.addEventListener("click", () => {
+    if (!currentBook) return;
+    closeDrawer();
+    if (currentBook.seriesId && seriesById(currentBook.seriesId)) openChapters("series", currentBook.seriesId, { volId: currentBook.id });
+    else openChapters("book", currentBook.id);
   });
   el.btnPrev.addEventListener("click", () => rendition && rendition.prev());
   el.btnNext.addEventListener("click", () => rendition && rendition.next());

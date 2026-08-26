@@ -43,6 +43,7 @@
   /* Book/serif face — Merriweather ships with the app (used by the reader),
      so the info page borrows it for titles and descriptions. */
   --font-serif: "Merriweather", Georgia, serif;
+  --font-mono: ui-monospace, "SF Mono", "SFMono-Regular", Menlo, Consolas, monospace;
   --cover-ph: repeating-linear-gradient(135deg, #333a47 0 4px, #2b313d 4px 8px);
 }
 
@@ -589,10 +590,12 @@ html, body {
   inset: calc(var(--bar-h) + env(safe-area-inset-top)) 0 env(safe-area-inset-bottom) 0;
   justify-content: center;
   overflow: hidden;
-  background: var(--page);
+  /* Match the in-chapter reading background (not the app page colour) so a
+     chapter change or first load never flashes a lighter/white gap. */
+  background: #1f2129;
 }
-#viewer { width: 100%; height: 100%; }
-#viewer iframe { border: 0 !important; }
+#viewer { width: 100%; height: 100%; background: #1f2129; }
+#viewer iframe { border: 0 !important; background: #1f2129 !important; }
 #viewer, #viewer * { scrollbar-width: none; }
 #viewer ::-webkit-scrollbar, #viewer::-webkit-scrollbar { width: 0; height: 0; display: none; }
 
@@ -1080,7 +1083,240 @@ html, body {
 .install-note:hover { color: var(--text-secondary); }
 .install-note svg { flex: 0 0 auto; }
 
+/* =========================================================================
+   CHAPTERS screen (8a) — a pushed, searchable, virtualised chapter list.
+   A fixed header block (bar · search · volume chips) over a scrolling list
+   with sticky range headers; a floating "Back to ch. N" pill.
+   ========================================================================= */
+#app[data-route="chapters"] #chapters-screen { display: flex; }
+.chapters-screen {
+  position: relative;
+  height: 100%;
+  flex-direction: column;
+  background: var(--page);
+  overflow: hidden;
+}
+
+/* Bar — back · title block · sort toggle. */
+.ch-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 52px;
+  padding: env(safe-area-inset-top) 14px 0;
+  flex: none;
+}
+.ch-bar__icon {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  color: var(--text-body);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex: none;
+}
+.ch-bar__icon:hover { background: var(--surface); }
+.ch-bar__titles { flex: 1 1 auto; min-width: 0; }
+.ch-bar__title { font: 600 14.5px var(--font-ui); color: var(--text-secondary); }
+.ch-bar__context {
+  font: 400 11.5px var(--font-ui);
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: 1px;
+}
+
+/* Search — sticky under the bar; matches on title and number. */
+.ch-search {
+  flex: none;
+  padding: 0 20px 12px;
+}
+.ch-search__box {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  height: 38px;
+  padding: 0 13px;
+  border-radius: 10px;
+  background: var(--surface);
+}
+.ch-search__icon { color: var(--text-dimmest); flex: none; display: inline-flex; }
+.ch-search__input {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  width: 100%;
+  color: var(--text-body);
+  font: 400 13.5px var(--font-ui);
+}
+.ch-search__input::placeholder { color: var(--text-dimmest); }
+.ch-search__input:focus { outline: none; }
+
+/* Volume chips (series only) — filter, do not navigate. */
+.ch-chips {
+  flex: none;
+  display: flex;
+  gap: 8px;
+  padding: 0 20px 14px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.ch-chips::-webkit-scrollbar { display: none; }
+.ch-chip {
+  appearance: none;
+  border: 0;
+  flex: none;
+  padding: 6px 13px;
+  border-radius: 14px;
+  background: var(--surface);
+  color: var(--text-muted2);
+  font: 500 12px var(--font-ui);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.ch-chip--on { background: var(--pill); color: var(--text-primary); }
+
+/* The scrolling list. */
+.ch-list {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+}
+
+/* Sticky range header, generated every 50 chapters. */
+.ch-range {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 7px 20px;
+  background: var(--surface-alt);
+  border-top: 1px solid var(--border-hair);
+  border-bottom: 1px solid var(--border-hair);
+}
+.ch-range__label {
+  font: 500 10.5px var(--font-ui);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--text-dimmest);
+}
+.ch-range__total { font: 400 11.5px var(--font-ui); color: #5b636f; }
+
+/* Chapter rows — off-screen rows are cheap to skip while scrolling. */
+.ch-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 12px 20px;
+  border: 0;
+  border-bottom: 1px solid var(--border-hair);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 48px;
+}
+.ch-row__num {
+  flex: none;
+  width: 34px;
+  text-align: right;
+  font: 400 12.5px var(--font-mono);
+  color: var(--text-dimmest);
+}
+.ch-row__title {
+  flex: 1 1 auto;
+  min-width: 0;
+  font: 400 14.5px var(--font-ui);
+  color: var(--text-body);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ch-row__sub { font: 400 11.5px var(--font-ui); color: var(--fill-card); margin-top: 2px; }
+.ch-row__check { flex: none; color: #4f5763; display: inline-flex; }
+
+/* Read — dimmed title, muted number, a check. */
+.ch-row--read .ch-row__num { color: #5b636f; }
+.ch-row--read .ch-row__title { color: var(--text-dim); }
+
+/* Current — taller, tinted, a left accent; no check. */
+.ch-row--current {
+  padding: 14px 20px;
+  background: var(--surface);
+  border-left: 2px solid var(--fill-cover);
+  contain-intrinsic-size: auto 66px;
+}
+.ch-row--current .ch-row__num { width: 32px; font-weight: 600; color: var(--text-body); }
+.ch-row--current .ch-row__title { color: var(--text-primary); font-weight: 600; white-space: normal; }
+.ch-row__title-wrap { flex: 1 1 auto; min-width: 0; }
+
+/* Empty search result — one line, no illustration. */
+.ch-empty { padding: 22px 20px; font: 300 14.5px/1.5 var(--font-serif); color: var(--text-dim); }
+
+/* Floating "Back to ch. N" pill over a footer fade. */
+.ch-backpill-wrap {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 56px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding-bottom: calc(10px + env(safe-area-inset-bottom));
+  pointer-events: none;
+  background: linear-gradient(rgba(26, 30, 39, 0), var(--page) 42%);
+  opacity: 0;
+  transition: opacity 0.18s ease;
+}
+.ch-backpill-wrap.show { opacity: 1; }
+.ch-backpill {
+  pointer-events: auto;
+  appearance: none;
+  height: 38px;
+  padding: 0 17px;
+  border-radius: 19px;
+  background: var(--pill);
+  border: 1px solid #3a4350;
+  color: var(--text-primary);
+  font: 500 12.5px var(--font-ui);
+  cursor: pointer;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
+}
+
+/* A tappable metadata row on the info page (the "Chapters" entry point). */
+.info-trow--link { cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.info-trow--link:hover { background: rgba(255, 255, 255, 0.02); }
+.info-trow__v--nav { display: inline-flex; align-items: center; gap: 4px; }
+.info-trow__chev { color: var(--text-dimmest); display: inline-flex; }
+
+/* "See all chapters" — pinned footer of the reader drawer's short list. */
+.drawer-seeall {
+  flex: none;
+  appearance: none;
+  border: 0;
+  border-top: 1px solid var(--border-strong);
+  background: transparent;
+  width: 100%;
+  text-align: left;
+  padding: 12px 18px calc(12px + env(safe-area-inset-bottom));
+  font: 500 13px var(--font-ui);
+  color: var(--text-muted2);
+  cursor: pointer;
+}
+.drawer-seeall:hover { color: var(--text-secondary); background: #262c38; }
+
 @media (prefers-reduced-motion: reduce) {
-  .drawer, .scrim { transition: none; }
+  .drawer, .scrim, .ch-backpill-wrap { transition: none; }
   .sheet-card { animation: none; }
 }
