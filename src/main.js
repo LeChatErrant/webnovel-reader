@@ -384,13 +384,17 @@ async function importFiles(fileList) {
 }
 
 // After import, cluster books by (title-without-volume + author). Any cluster
-// of 2+ standalone books that includes a new import, and hasn't been dismissed,
-// gets one suggestion card.
+// of 2+ standalone books that includes a new import gets one suggestion card.
+// The prompt is import-time only (it never nags in the background), so we ask
+// whenever look-alikes are imported. "Keep separate" declines just this import
+// rather than suppressing the title forever — a permanent, easily-triggered
+// dismissal (e.g. an accidental tap outside the sheet) silently killed the
+// feature on phones.
 async function suggestGrouping(added) {
   const seen = new Set();
   for (const nb of added) {
     const key = seriesKey(nb);
-    if (seen.has(key) || ui.dismissedKeys.includes(key)) continue;
+    if (seen.has(key)) continue;
     seen.add(key);
     const cluster = books.filter((b) => seriesKey(b) === key);
     const seriesIds = new Set(cluster.map((b) => b.seriesId).filter(Boolean));
@@ -401,12 +405,7 @@ async function suggestGrouping(added) {
     const name = stripVolume(nb.title) || nb.title;
     // eslint-disable-next-line no-await-in-loop
     const grouping = await showSuggestSheet(name, cluster.length);
-    if (grouping) {
-      await groupIntoSeries(cluster.map((b) => b.id), name);
-    } else {
-      ui.dismissedKeys.push(key);
-      await saveUi();
-    }
+    if (grouping) await groupIntoSeries(cluster.map((b) => b.id), name);
     renderCurrentRoute();
   }
 }
