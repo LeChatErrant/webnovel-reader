@@ -471,6 +471,12 @@ function renderLibrary() {
     return;
   }
 
+  // Series hints: ungrouped look-alikes worth grouping. Shown outside search
+  // and selection so they never clutter those modes.
+  if (!libFilter && !selection) {
+    for (const cluster of ungroupedClusters()) body.append(seriesHint(cluster));
+  }
+
   // Continue section.
   const cont = continueTarget();
   if (cont && !libFilter) body.append(continueSection(cont));
@@ -534,6 +540,46 @@ function bookTile(book) {
   );
   attachTileGestures(tile, book);
   return tile;
+}
+
+// Standalone (ungrouped) books that share a series key, clustered. Web-novel
+// volumes added over time — or before grouping existed — land here so we can
+// nudge the reader to group them. Not gated by dismissedKeys: this is the
+// persistent, low-key counterpart to the one-shot import suggestion.
+function ungroupedClusters() {
+  const byKey = new Map();
+  for (const b of books) {
+    if (b.seriesId) continue;
+    const key = seriesKey(b);
+    if (!byKey.has(key)) byKey.set(key, []);
+    byKey.get(key).push(b);
+  }
+  const clusters = [];
+  for (const group of byKey.values()) {
+    if (group.length < 2) continue;
+    group.sort((a, b) => (a.volumeIndex ?? 99) - (b.volumeIndex ?? 99) || a.addedAt - b.addedAt);
+    clusters.push({ books: group, name: stripVolume(group[0].title) || group[0].title });
+  }
+  return clusters;
+}
+
+// A gentle, persistent hint. Tapping it pre-selects the cluster and drops into
+// selection mode; the reader confirms with the existing "Group as series" bar.
+function seriesHint(cluster) {
+  return h(
+    "button",
+    { class: "series-hint", type: "button", onclick: () => enterSelectionWith(cluster.books.map((b) => b.id)) },
+    svg(
+      '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3" width="10" height="14" rx="1.5"/><path d="M8 21h11a1.5 1.5 0 0 0 1.5-1.5V8"/></svg>'
+    ),
+    h(
+      "span",
+      { class: "series-hint__text" },
+      h("strong", null, cluster.name),
+      ` — ${cluster.books.length} books look like one series`
+    ),
+    h("span", { class: "series-hint__cta" }, "Group")
+  );
 }
 
 function seriesTile(s) {
@@ -1315,6 +1361,15 @@ function attachTileGestures(tile, book) {
 
 function enterSelection(id) {
   selection = new Set([id]);
+  document.getElementById("app").classList.add("selecting");
+  updateSelectBar();
+  renderLibrary();
+}
+// Enter selection with a set of books already picked (used by the series hint),
+// so the user only has to confirm "Group as series".
+function enterSelectionWith(ids) {
+  if (ids.length < 2) return;
+  selection = new Set(ids);
   document.getElementById("app").classList.add("selecting");
   updateSelectBar();
   renderLibrary();
