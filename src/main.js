@@ -115,6 +115,8 @@ const ICON = {
   plus: '<svg viewBox="0 0 24 24" width="22" height="22"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
   back: '<svg viewBox="0 0 24 24" width="20" height="20"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   more: '<svg viewBox="0 0 24 24" width="20" height="20"><circle cx="5" cy="12" r="1.6" fill="currentColor"/><circle cx="12" cy="12" r="1.6" fill="currentColor"/><circle cx="19" cy="12" r="1.6" fill="currentColor"/></svg>',
+  close: '<svg viewBox="0 0 24 24" width="20" height="20"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
+  handle: '<svg viewBox="0 0 24 24" width="18" height="18"><circle cx="9" cy="6" r="1.4" fill="currentColor"/><circle cx="15" cy="6" r="1.4" fill="currentColor"/><circle cx="9" cy="12" r="1.4" fill="currentColor"/><circle cx="15" cy="12" r="1.4" fill="currentColor"/><circle cx="9" cy="18" r="1.4" fill="currentColor"/><circle cx="15" cy="18" r="1.4" fill="currentColor"/></svg>',
 };
 
 // -------------------------------------------------------------------------
@@ -269,6 +271,22 @@ function stripVolume(title) {
 const normalize = (s) => (s || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 const seriesKey = (book) => normalize(stripVolume(book.title)) + "|" + normalize(book.author);
 
+// dc:subject isn't exposed by epub.js's parsed metadata, so read it straight
+// from the package document. Best-effort: any failure just yields no subjects.
+async function parseSubjects(b) {
+  try {
+    const opfPath = b.container?.packagePath || b.packaging?.metadata?.packagePath;
+    if (!opfPath || !b.archive) return [];
+    const xml = await b.archive.getText(opfPath);
+    const doc = new DOMParser().parseFromString(xml, "application/xml");
+    return [...doc.getElementsByTagNameNS("*", "subject")]
+      .map((n) => (n.textContent || "").trim())
+      .filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
 async function parseEpub(buffer, filename) {
   const b = ePub(buffer);
   await b.ready;
@@ -276,6 +294,7 @@ async function parseEpub(buffer, filename) {
   const nav = await b.loaded.navigation.catch(() => ({ toc: [] }));
   const chapters = flatten(nav.toc);
   const spineCount = b.spine?.spineItems?.length || chapters.length || 1;
+  const subjects = await parseSubjects(b);
   let coverBlob = null;
   try {
     const url = await b.coverUrl();
@@ -285,6 +304,7 @@ async function parseEpub(buffer, filename) {
   }
   const title = (meta.title || filename.replace(/\.epub$/i, "")).trim();
   const author = (meta.creator || "").trim();
+  const clean = (v) => (v || "").trim();
   try {
     b.destroy();
   } catch {
@@ -296,6 +316,13 @@ async function parseEpub(buffer, filename) {
     coverBlob,
     chapters,
     spineCount,
+    // Extra descriptive metadata for the info page. Web-novel epubs are often
+    // sloppy, so any of these may be empty — the info page omits blank fields.
+    description: clean(meta.description),
+    language: clean(meta.language),
+    publisher: clean(meta.publisher),
+    published: clean(meta.pubdate),
+    subjects,
     volumeIndex: parseVolumeIndex(title) || parseVolumeIndex(filename),
   };
 }
@@ -305,6 +332,7 @@ async function createBook(buffer, filename, { seriesId = null } = {}) {
   const book = {
     id: uid(),
     ...parsed,
+    fileName: filename,
     fileBlob: new Blob([buffer], { type: "application/epub+zip" }),
     seriesId,
     addedAt: Date.now(),
@@ -421,7 +449,7 @@ let libFilter = "";
 function shelfItems() {
   const items = [
     ...series.map((s) => ({ type: "series", series: s, title: s.name, activity: seriesActivity(s) })),
-    ...books.filter((b) => !b.seriesId).map((b) => ({ type: "book", book: b, title: b.title, activity: bookActivity(b) })),
+    ...books.filter((b) => !b.seriesId).map((b) => ({ type: "book", book: b, title: displayTitle(b), activity: bookActivity(b) })),
   ];
   if (ui.sort === "title") items.sort((a, b) => a.title.localeCompare(b.title));
   else items.sort((a, b) => b.activity - a.activity);
@@ -478,7 +506,7 @@ function continueSection(book) {
     h(
       "div",
       { class: "continue-card__text" },
-      h("div", { class: "continue-card__title" }, book.title),
+      h("div", { class: "continue-card__title" }, displayTitle(book)),
       h("div", { class: "continue-card__sub" }, continueSubtitle(book)),
       progressBar(bookPercent(book), "card")
     )
@@ -501,7 +529,7 @@ function bookTile(book) {
     "div",
     { class: "tile" + (selecting ? " tile--selectable" : "") + (selected ? " tile--selected" : ""), dataset: { bookId: book.id } },
     cover,
-    h("div", { class: "tile__title" }, book.title),
+    h("div", { class: "tile__title" }, displayTitle(book)),
     h("div", { class: "tile__meta" }, bookMetaText(book))
   );
   attachTileGestures(tile, book);
@@ -517,7 +545,7 @@ function seriesTile(s) {
   const curNum = cur ? volumeNumber(s, cur) : 1;
   const tile = h(
     "div",
-    { class: "tile tile--series", onclick: () => !selection && openSeries(s.id) },
+    { class: "tile tile--series", onclick: () => !selection && openInfo("series", s.id) },
     stack,
     h("div", { class: "tile__title" }, s.name),
     h("div", { class: "tile__meta" }, `${s.bookIds.length} volumes · Vol. ${curNum}`)
@@ -562,69 +590,264 @@ function toggleSort() {
 }
 
 // =========================================================================
-// SERIES screen
+// INFO page (design 6a) — one screen for both a standalone book and a series.
+// Reached by tapping any cover on the shelf. It *replaces* the old plain
+// series screen: a series gets the full page (with a Volumes block), a
+// standalone book gets the same page without it.
 // =========================================================================
-function renderSeries(id) {
-  const s = seriesById(id);
-  const root = el.seriesScreen;
+
+// A few small formatters for the metadata table / volume sheet.
+function formatBytes(n) {
+  if (!n) return "";
+  const mb = n / (1024 * 1024);
+  if (mb >= 1) return mb.toFixed(1) + " MB";
+  return Math.max(1, Math.round(n / 1024)) + " KB";
+}
+function formatPublished(v) {
+  if (!v) return "";
+  const m = String(v).match(/\d{4}/);
+  return m ? m[0] : String(v);
+}
+function formatAdded(ts) {
+  if (!ts) return "";
+  try {
+    return new Date(ts).toLocaleDateString(undefined, { day: "numeric", month: "long" });
+  } catch {
+    return "";
+  }
+}
+const LANG_NAMES = {
+  en: "English", fr: "French", ja: "Japanese", zh: "Chinese", es: "Spanish",
+  de: "German", ko: "Korean", ru: "Russian", it: "Italian", pt: "Portuguese",
+};
+function formatLang(code) {
+  if (!code) return "";
+  const k = String(code).toLowerCase().split(/[-_]/)[0];
+  return LANG_NAMES[k] || code;
+}
+// Strip HTML from a description without loading any resources (DOMParser does
+// not run scripts or fetch), keeping paragraph breaks as newlines.
+function stripHtml(html) {
+  try {
+    const doc = new DOMParser().parseFromString(String(html), "text/html");
+    doc.querySelectorAll("p, br, div, li").forEach((n) => n.after(doc.createTextNode("\n")));
+    return (doc.body.textContent || "").replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+  } catch {
+    return String(html);
+  }
+}
+
+// The text fields the info page shows and Edit details can type over.
+const META_FIELDS = ["author", "description", "language", "published", "publisher"];
+
+// A typed override, if the user entered one (empty means "no override").
+function overrideOf(obj, field) {
+  const v = obj?.overrides?.[field];
+  return typeof v === "string" && v.trim() ? v.trim() : "";
+}
+// The title to show for a book everywhere (shelf, reader, drawer, volume rows):
+// an Edit-details override wins over the .epub's own title.
+function displayTitle(book) {
+  return (book && (overrideOf(book, "title") || book.title)) || "";
+}
+// Metadata for a collection resolves in priority order (spec 2d): a typed
+// override wins, then the marked source volume, then the first volume with a
+// value. Never merged field-by-field. Totals are summed across the collection.
+function resolveField(container, vols, field, source) {
+  const typed = overrideOf(container, field);
+  if (typed) return typed;
+  if (source && source[field]) return source[field];
+  for (const b of vols) if (b[field]) return b[field];
+  return "";
+}
+function resolveSubjects(container, vols, source) {
+  if (container?.overrides?.subjects?.length) return container.overrides.subjects;
+  if (source?.subjects?.length) return source.subjects;
+  for (const b of vols) if (b.subjects?.length) return b.subjects;
+  return [];
+}
+function metadataSource(s, vols) {
+  return (s.metadataSourceBookId && bookById(s.metadataSourceBookId)) || vols[0] || null;
+}
+
+function infoModel(kind, id) {
+  if (kind === "series") {
+    const s = seriesById(id);
+    if (!s) return null;
+    const vols = seriesVolumes(s);
+    const source = metadataSource(s, vols);
+    return {
+      kind, id, series: s, volumes: vols, currentVolume: currentVolume(s),
+      coverBook: source || currentVolume(s),
+      title: s.name,
+      author: resolveField(s, vols, "author", source),
+      description: resolveField(s, vols, "description", source),
+      subjects: resolveSubjects(s, vols, source),
+      language: resolveField(s, vols, "language", source),
+      publisher: resolveField(s, vols, "publisher", source),
+      published: resolveField(s, vols, "published", source),
+      volumeCount: vols.length,
+      chapterCount: vols.reduce((n, b) => n + chapterCount(b), 0),
+      fileCount: vols.length,
+      byteSize: vols.reduce((n, b) => n + (b.fileBlob?.size || 0), 0),
+      continueTarget: currentVolume(s),
+    };
+  }
+  const b = bookById(id);
+  if (!b) return null;
+  return {
+    kind, id, book: b, volumes: [], currentVolume: null,
+    coverBook: b,
+    title: overrideOf(b, "title") || b.title,
+    author: overrideOf(b, "author") || b.author || "",
+    description: overrideOf(b, "description") || b.description || "",
+    subjects: b.overrides?.subjects?.length ? b.overrides.subjects : b.subjects || [],
+    language: overrideOf(b, "language") || b.language || "",
+    publisher: overrideOf(b, "publisher") || b.publisher || "",
+    published: overrideOf(b, "published") || b.published || "",
+    volumeCount: null,
+    chapterCount: chapterCount(b),
+    fileCount: 1,
+    byteSize: b.fileBlob?.size || 0,
+    continueTarget: b,
+  };
+}
+
+// The primary-action label: it always names the volume/chapter, so the volume
+// list is optional. Start reading · Continue ch. N · Continue vol. N · ch. M · Read again.
+function continueInfo(m) {
+  const t = m.continueTarget;
+  if (!t) return { label: "Start reading", target: null };
+  const p = progressMap[t.id];
+  if (bookPercent(t) >= 100) return { label: "Read again", target: t };
+  if (!p) return { label: "Start reading", target: t };
+  if (m.kind === "series") {
+    const abs = (p.chapterIndex ?? 0) + 1 + volumeChapterOffset(t);
+    return { label: `Continue vol. ${volumeNumber(m.series, t)} · ch. ${abs}`, target: t };
+  }
+  return { label: `Continue ch. ${(p.chapterIndex ?? 0) + 1}`, target: t };
+}
+
+function renderInfo(kind, id) {
+  const m = infoModel(kind, id);
+  const root = el.infoScreen;
   root.innerHTML = "";
-  if (!s) {
+  if (!m) {
     go({ route: "library" });
     return;
   }
-  const vols = seriesVolumes(s);
-  const cur = currentVolume(s);
-  const totalChapters = vols.reduce((n, b) => n + chapterCount(b), 0);
 
-  // Bar.
+  // Backdrop — the cover blurred behind the hero. No cover → flat page.
+  const bgUrl = coverUrlFor(m.coverBook);
+  if (bgUrl) {
+    root.append(
+      h(
+        "div",
+        { class: "info-backdrop" },
+        h("div", { class: "info-backdrop__img", style: `background-image:url("${bgUrl}")` }),
+        h("div", { class: "info-backdrop__veil" })
+      )
+    );
+  }
+
+  // Bar — back · ⋯ (no title; the title lives in the page).
   root.append(
     h(
       "div",
-      { class: "sbar" },
+      { class: "info-bar" },
       h("button", { class: "sbar__icon", "aria-label": "Back", onclick: () => go({ route: "library" }) }, svg(ICON.back)),
-      h("div", { class: "sbar__title" }, "Series"),
-      h("button", { class: "sbar__icon", "aria-label": "Rename series", onclick: () => renameSeries(s) }, svg(ICON.more))
+      h("div", { class: "info-bar__spacer" }),
+      h("button", { class: "sbar__icon", "aria-label": "More", onclick: () => openInfoMenu(m) }, svg(ICON.more))
     )
   );
 
-  // Header block.
-  const metaBits = [s.author, `${vols.length} volumes`, `${totalChapters.toLocaleString()} chapters`].filter(Boolean);
-  const curNum = cur ? volumeNumber(s, cur) : 1;
-  root.append(
+  const content = h("div", { class: "info-content" });
+
+  // Hero.
+  content.append(
     h(
       "div",
-      { class: "sheader" },
-      coverNode(cur, "sheader__cover"),
+      { class: "info-hero" },
+      coverNode(m.coverBook, "info-hero__cover"),
+      h("div", { class: "info-hero__title" }, m.title),
+      m.author && h("div", { class: "info-hero__author" }, m.author)
+    )
+  );
+
+  // Primary action.
+  const ci = continueInfo(m);
+  content.append(
+    h(
+      "div",
+      { class: "info-actions" },
       h(
-        "div",
-        { class: "sheader__col" },
-        h("div", { class: "sheader__title" }, s.name),
-        h("div", { class: "sheader__meta" }, metaBits.join(" · ")),
-        cur &&
-          h("button", { class: "pill-btn sheader__cta", onclick: () => openBook(cur.id) }, `Continue vol. ${curNum}`)
+        "button",
+        { class: "pill-btn info-actions__continue", disabled: !ci.target, onclick: () => ci.target && openBook(ci.target.id) },
+        ci.label
       )
     )
   );
 
-  // Volumes.
-  root.append(h("div", { class: "lib-label sheader__vollabel" }, "Volumes"));
-  let offset = 0;
-  for (const b of vols) {
-    const count = chapterCount(b);
-    const start = offset + 1;
-    const end = offset + count;
-    offset = end;
-    root.append(volumeRow(s, b, start, end, cur));
+  // Subject chips.
+  if (m.subjects.length) {
+    const chips = h("div", { class: "info-chips" });
+    for (const sub of m.subjects.slice(0, 6)) chips.append(h("span", { class: "info-chip" }, sub));
+    content.append(chips);
   }
 
-  root.append(
-    h(
-      "button",
-      { class: "add-volume", onclick: () => addVolumeToSeries(s.id) },
-      h("span", { class: "add-volume__plus" }, "+"),
-      "Add a volume to this series"
-    )
-  );
+  // Description — clamped to 4 lines with an inline "more".
+  if (m.description) {
+    const body = h("p", { class: "info-desc__text" }, stripHtml(m.description));
+    const more = h("button", { class: "info-desc__more", onclick: () => { body.classList.add("expanded"); more.remove(); } }, "more");
+    content.append(h("div", { class: "info-desc" }, body, more));
+    // Drop "more" if the text isn't actually clipped.
+    requestAnimationFrame(() => {
+      if (body.scrollHeight <= body.clientHeight + 2) more.remove();
+    });
+  }
+
+  // Metadata table — missing fields are omitted, never blanked.
+  const rows = [];
+  if (m.volumeCount != null) rows.push(["Volumes", String(m.volumeCount)]);
+  rows.push(["Chapters", m.chapterCount.toLocaleString()]);
+  const lang = formatLang(m.language);
+  if (lang) rows.push(["Language", lang]);
+  const pub = formatPublished(m.published);
+  if (pub) rows.push(["Published", pub]);
+  if (m.publisher) rows.push(["Publisher", m.publisher]);
+  const size = formatBytes(m.byteSize);
+  rows.push(["On this device", `${m.fileCount} file${m.fileCount === 1 ? "" : "s"}${size ? " · " + size : ""}`]);
+  const table = h("div", { class: "info-table" });
+  for (const [label, value] of rows) {
+    table.append(
+      h("div", { class: "info-trow" }, h("span", { class: "info-trow__k" }, label), h("span", { class: "info-trow__v" }, value))
+    );
+  }
+  content.append(table);
+
+  // Volumes block (series only).
+  if (m.kind === "series") {
+    content.append(h("div", { class: "lib-label info-vollabel" }, "Volumes"));
+    let offset = 0;
+    for (const b of m.volumes) {
+      const count = chapterCount(b);
+      const start = offset + 1;
+      const end = offset + count;
+      offset = end;
+      content.append(volumeRow(m.series, b, start, end, m.currentVolume));
+    }
+    content.append(
+      h(
+        "button",
+        { class: "add-volume", onclick: () => addVolumeToSeries(m.series.id) },
+        h("span", { class: "add-volume__plus" }, "+"),
+        "Add a volume to this series"
+      )
+    );
+  }
+
+  root.append(content);
+  root.scrollTop = 0;
 }
 
 function volumeRow(s, book, start, end, cur) {
@@ -635,10 +858,10 @@ function volumeRow(s, book, start, end, cur) {
   if (pct >= 100) statusText = "finished";
   else if (p) statusText = "reading ch. " + (p.chapterIndex + 1 + start - 1);
   else statusText = "not started";
-  const title = "Vol. " + volumeNumber(s, book) + (stripVolume(book.title) ? " · " + stripVolume(book.title) : "");
-  return h(
+  const title = "Vol. " + volumeNumber(s, book) + (stripVolume(displayTitle(book)) ? " · " + stripVolume(displayTitle(book)) : "");
+  const row = h(
     "div",
-    { class: "vrow" + (isCurrent ? " vrow--current" : ""), onclick: () => openBook(book.id) },
+    { class: "vrow" + (isCurrent ? " vrow--current" : "") },
     coverNode(book, "vrow__thumb"),
     h(
       "div",
@@ -648,6 +871,13 @@ function volumeRow(s, book, start, end, cur) {
     ),
     h("div", { class: "vrow__pct" }, pct >= 100 ? "100 %" : bookIsStarted(book) ? pct + " %" : "")
   );
+  // Tap raises the volume sheet (it does not start reading); long-press is a
+  // shortcut to delete the volume.
+  attachLongPress(row, {
+    onLongPress: () => confirmDeleteVolume(book),
+    onTap: () => showVolumeSheet(s, book, start, end),
+  });
+  return row;
 }
 
 function addVolumeToSeries(seriesId) {
@@ -660,9 +890,363 @@ function renameSeries(s) {
     if (name) {
       s.name = name;
       dbPut("series", s);
-      renderSeries(s.id);
+      renderInfo("series", s.id);
     }
   });
+}
+
+async function confirmDeleteSeries(s) {
+  const vols = seriesVolumes(s);
+  const ok = await showConfirmSheet(
+    "Delete this series?",
+    `“${s.name}” and its ${vols.length} volume${vols.length === 1 ? "" : "s"} will be removed from this device — the files and your place in them. This can't be undone.`,
+    "Delete"
+  );
+  if (!ok) return;
+  for (const b of vols) await deleteBook(b.id); // eslint-disable-line no-await-in-loop
+  go({ route: "library" });
+}
+
+async function confirmDeleteBook(b) {
+  const ok = await showConfirmSheet(
+    "Delete this book?",
+    `“${displayTitle(b)}” will be removed from this device — the file and your place in it. This can't be undone.`,
+    "Delete"
+  );
+  if (!ok) return;
+  await deleteBook(b.id);
+  go({ route: "library" });
+}
+
+// The ⋯ overflow menu on the info page.
+function openInfoMenu(m) {
+  if (m.kind === "series") {
+    showActionSheet([
+      { label: "Edit details", onClick: () => showEditDetails(m) },
+      { label: "Series details", onClick: () => showSeriesDetails(m.series) },
+      { label: "Delete series", danger: true, onClick: () => confirmDeleteSeries(m.series) },
+    ]);
+  } else {
+    showActionSheet([
+      { label: "Edit details", onClick: () => showEditDetails(m) },
+      { label: "Delete book", danger: true, onClick: () => confirmDeleteBook(m.book) },
+    ]);
+  }
+}
+
+// =========================================================================
+// Full-screen editors — Edit details (type over any field) and Series details
+// (name, metadata source, volume order). Both live in the #editor overlay,
+// dismissed by ✕ or Escape; only Save commits.
+// =========================================================================
+function closeEditor() {
+  el.editor.hidden = true;
+  el.editor.innerHTML = "";
+}
+function openEditorShell(title) {
+  el.editor.innerHTML = "";
+  const saveBtn = h("button", { class: "editor-save" }, "Save");
+  el.editor.append(
+    h(
+      "div",
+      { class: "editor-bar" },
+      h("button", { class: "sbar__icon", "aria-label": "Cancel", onclick: closeEditor }, svg(ICON.close)),
+      h("div", { class: "editor-bar__title" }, title),
+      saveBtn
+    )
+  );
+  const body = h("div", { class: "editor-body" });
+  el.editor.append(body);
+  el.editor.hidden = false;
+  return { body, saveBtn };
+}
+
+// Edit details — type over any field; what's typed always wins. An emptied
+// field drops the override and reverts to the file's value.
+function showEditDetails(m) {
+  const cur = {
+    title: m.title,
+    author: m.author,
+    description: m.description,
+    subjects: m.subjects.join(", "),
+    language: m.language,
+    published: m.published,
+    publisher: m.publisher,
+  };
+  const { body, saveBtn } = openEditorShell("Edit details");
+  body.append(h("p", { class: "editor-lead" }, "Type over anything the .epub got wrong. What you enter here always wins; clear a field to fall back to the file."));
+
+  const inputs = {};
+  const addField = (key, label, area) => {
+    const input = area
+      ? h("textarea", { class: "editor-input editor-input--area", rows: "5" })
+      : h("input", { class: "editor-input", type: "text" });
+    input.value = cur[key] || "";
+    inputs[key] = input;
+    body.append(h("label", { class: "editor-field" }, h("span", { class: "editor-field__label" }, label), input));
+  };
+  addField("title", "Title");
+  addField("author", "Author");
+  addField("description", "Description", true);
+  addField("subjects", "Subjects (comma-separated)");
+  addField("language", "Language");
+  addField("published", "Published");
+  addField("publisher", "Publisher");
+
+  saveBtn.onclick = async () => {
+    const val = (k) => inputs[k].value.trim();
+    const subs = val("subjects").split(",").map((x) => x.trim()).filter(Boolean);
+    if (m.kind === "series") {
+      const s = m.series;
+      if (val("title")) s.name = val("title"); // a series title is its name
+      s.overrides = s.overrides || {};
+      for (const k of META_FIELDS) {
+        if (val(k)) s.overrides[k] = val(k);
+        else delete s.overrides[k];
+      }
+      if (subs.length) s.overrides.subjects = subs;
+      else delete s.overrides.subjects;
+      await dbPut("series", s);
+    } else {
+      const b = m.book;
+      b.overrides = b.overrides || {};
+      for (const k of ["title", ...META_FIELDS]) {
+        if (val(k)) b.overrides[k] = val(k);
+        else delete b.overrides[k];
+      }
+      if (subs.length) b.overrides.subjects = subs;
+      else delete b.overrides.subjects;
+      await dbPut("books", b);
+    }
+    closeEditor();
+    renderInfo(m.kind, m.id);
+  };
+}
+
+// A one-line summary of what a volume file actually contains, so choosing the
+// metadata source is informed rather than a guess.
+function volumeContentsLabel(b) {
+  const parts = [b.coverBlob ? "Has cover" : "No cover", b.description ? "description" : "no description"];
+  const n = (b.subjects || []).length;
+  if (n) parts.push(`${n} subject${n === 1 ? "" : "s"}`);
+  return parts.join(" · ");
+}
+
+// Series details — name, which volume supplies cover/description, and volume
+// order (drag to reorder; reordering sets a manual-order flag).
+function showSeriesDetails(s) {
+  const { body, saveBtn } = openEditorShell("Series details");
+  let order = [...s.bookIds];
+  let sourceId = (s.metadataSourceBookId && bookById(s.metadataSourceBookId) ? s.metadataSourceBookId : s.bookIds[0]) || null;
+  let reordered = false;
+
+  // Series name.
+  const nameInput = h("input", { class: "editor-input", type: "text" });
+  nameInput.value = s.name || "";
+  body.append(h("label", { class: "editor-field" }, h("span", { class: "editor-field__label" }, "Series name"), nameInput));
+
+  // Metadata source radio list.
+  body.append(h("div", { class: "editor-section-label" }, "Cover and description from"));
+  body.append(h("p", { class: "editor-lead" }, "The volumes disagree, so pick which file the page should use. Fields are never mixed across volumes."));
+  const radioList = h("div", { class: "radio-list" });
+  const renderRadios = () => {
+    radioList.innerHTML = "";
+    for (const b of order.map(bookById).filter(Boolean)) {
+      const selected = b.id === sourceId;
+      const row = h(
+        "button",
+        {
+          class: "radio-row" + (selected ? " radio-row--on" : ""),
+          onclick: () => { sourceId = b.id; renderRadios(); },
+        },
+        h("span", { class: "radio-dot" + (selected ? " radio-dot--on" : "") }, selected ? "✓" : ""),
+        h(
+          "span",
+          { class: "radio-row__text" },
+          h("span", { class: "radio-row__title" }, "Vol. " + volumeNumber(s, b) + (stripVolume(b.title) ? " · " + stripVolume(b.title) : "")),
+          h("span", { class: "radio-row__sub" }, volumeContentsLabel(b))
+        )
+      );
+      radioList.append(row);
+    }
+  };
+  renderRadios();
+  body.append(radioList);
+
+  // Volume order — drag handles; chapter ranges recompute from the order.
+  body.append(h("div", { class: "editor-section-label" }, "Volume order"));
+  const orderList = h("div", { class: "order-list" });
+  const updateRanges = () => {
+    let off = 0;
+    [...orderList.children].forEach((row, i) => {
+      const b = bookById(order[i]);
+      if (!b) return;
+      const c = chapterCount(b);
+      row.querySelector(".order-row__range").textContent = `Ch. ${off + 1}–${off + c}`;
+      off += c;
+    });
+  };
+  const renderOrder = () => {
+    orderList.innerHTML = "";
+    for (const id of order) {
+      const b = bookById(id);
+      if (!b) continue;
+      const handle = h("span", { class: "order-row__handle", "aria-hidden": "true" }, svg(ICON.handle));
+      const row = h(
+        "div",
+        { class: "order-row", dataset: { id } },
+        handle,
+        h("span", { class: "order-row__title" }, stripVolume(b.title) || b.title),
+        h("span", { class: "order-row__range" }, "")
+      );
+      attachOrderDrag(handle, row, orderList, () => {
+        order = [...orderList.children].map((r) => r.dataset.id);
+        reordered = true;
+        updateRanges();
+      });
+      orderList.append(row);
+    }
+    updateRanges();
+  };
+  renderOrder();
+  body.append(orderList);
+
+  saveBtn.onclick = async () => {
+    if (nameInput.value.trim()) s.name = nameInput.value.trim();
+    s.metadataSourceBookId = sourceId;
+    const vols = order.map(bookById).filter(Boolean);
+    s.bookIds = vols.map((b) => b.id);
+    if (reordered) {
+      s.manualOrder = true;
+      vols.forEach((b, i) => { b.volumeIndex = i + 1; });
+      await Promise.all(vols.map((b) => dbPut("books", b)));
+    }
+    await dbPut("series", s);
+    closeEditor();
+    renderInfo("series", s.id);
+  };
+}
+
+// Pointer-based drag reorder for one handle. Uses pointer capture so the drag
+// survives the finger leaving the handle, and reorders DOM live; the caller
+// syncs its model on each move.
+function attachOrderDrag(handle, row, list, onReorder) {
+  handle.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    row.classList.add("dragging");
+    const move = (ev) => {
+      const others = [...list.querySelectorAll(".order-row:not(.dragging)")];
+      const after = others.find((r) => ev.clientY < r.getBoundingClientRect().top + r.offsetHeight / 2);
+      if (after) list.insertBefore(row, after);
+      else list.append(row);
+      onReorder();
+    };
+    const up = () => {
+      try { handle.releasePointerCapture(e.pointerId); } catch { /* ignore */ }
+      handle.removeEventListener("pointermove", move);
+      handle.removeEventListener("pointerup", up);
+      handle.removeEventListener("pointercancel", up);
+      row.classList.remove("dragging");
+    };
+    handle.addEventListener("pointermove", move);
+    handle.addEventListener("pointerup", up);
+    handle.addEventListener("pointercancel", up);
+    // Pointer capture keeps the drag alive when the finger leaves the handle.
+    // It can throw for a stale/synthetic pointer id — never let that abort the
+    // drag we just wired up.
+    try { handle.setPointerCapture(e.pointerId); } catch { /* ignore */ }
+  });
+}
+
+// =========================================================================
+// Volume sheet (design 7a) — tapping a volume row raises this; it does not
+// start reading. Continue / Chapters push the reader; Remove drops the volume.
+// =========================================================================
+function hideVolumeSheet() {
+  el.volumeSheet.hidden = true;
+  el.volumeCard.innerHTML = "";
+}
+function showVolumeSheet(s, book, start, end) {
+  const total = seriesVolumes(s).length;
+  const volNum = volumeNumber(s, book);
+  const p = progressMap[book.id];
+  const pct = bookPercent(book);
+  const absCh = (p ? p.chapterIndex + 1 : 1) + volumeChapterOffset(book);
+  const volTitle = "Vol. " + volNum + (stripVolume(displayTitle(book)) ? " · " + stripVolume(displayTitle(book)) : "");
+  let statusLine;
+  if (pct >= 100) statusLine = "Finished · 100 %";
+  else if (p) statusLine = `Reading ch. ${absCh} · ${pct} %`;
+  else statusLine = "Not started";
+  const continueLabel = pct >= 100 ? "Read again" : p ? `Continue ch. ${absCh}` : "Start reading";
+
+  const facts = [
+    ["This volume", `${chapterCount(book)} chapters${formatBytes(book.fileBlob?.size) ? " · " + formatBytes(book.fileBlob.size) : ""}`],
+    book.fileName && ["File", book.fileName],
+    formatAdded(book.addedAt) && ["Added", formatAdded(book.addedAt)],
+  ].filter(Boolean);
+
+  const card = el.volumeCard;
+  card.innerHTML = "";
+  card.append(
+    h("div", { class: "vsheet__handle" }),
+    h(
+      "div",
+      { class: "vsheet__header" },
+      coverNode(book, "vsheet__thumb"),
+      h(
+        "div",
+        { class: "vsheet__hcol" },
+        h("div", { class: "lib-label" }, `Volume ${volNum} of ${total}`),
+        h("div", { class: "vsheet__title" }, volTitle),
+        h("div", { class: "vsheet__sub" }, `${s.name} · ch. ${start}–${end}`),
+        progressBar(pct, "card"),
+        h("div", { class: "vsheet__status" }, statusLine)
+      )
+    ),
+    h(
+      "div",
+      { class: "vsheet__actions" },
+      h("button", { class: "pill-btn vsheet__continue", onclick: () => { hideVolumeSheet(); openBook(book.id); } }, continueLabel),
+      h("button", { class: "outline-pill", onclick: () => { hideVolumeSheet(); openBook(book.id, { withDrawer: true }); } }, "Chapters")
+    ),
+    h(
+      "div",
+      { class: "vsheet__facts" },
+      ...facts.map(([k, v]) => h("div", { class: "vsheet__fact" }, h("span", { class: "vsheet__fact-k" }, k), h("span", { class: "vsheet__fact-v" }, v)))
+    ),
+    h(
+      "div",
+      { class: "vsheet__textactions" },
+      h("button", { class: "text-btn text-btn--danger", onclick: () => { hideVolumeSheet(); confirmDeleteVolume(book); } }, "Remove from series")
+    )
+  );
+  el.volumeSheet.hidden = false;
+}
+
+// =========================================================================
+// Action sheet — a small list of actions raised from a ⋯ menu.
+// =========================================================================
+function hideActionSheet() {
+  el.actionSheet.hidden = true;
+  el.actionCard.innerHTML = "";
+}
+function showActionSheet(actions) {
+  const card = el.actionCard;
+  card.innerHTML = "";
+  for (const a of actions) {
+    card.append(
+      h(
+        "button",
+        {
+          class: "action-item" + (a.danger ? " action-item--danger" : ""),
+          onclick: () => { hideActionSheet(); a.onClick(); },
+        },
+        a.label
+      )
+    );
+  }
+  card.append(h("button", { class: "action-item action-item--cancel", onclick: hideActionSheet }, "Cancel"));
+  el.actionSheet.hidden = false;
 }
 
 // =========================================================================
@@ -670,32 +1254,55 @@ function renameSeries(s) {
 // =========================================================================
 let selection = null; // Set of book ids, or null when not selecting
 
-function attachTileGestures(tile, book) {
+// A long-press primitive that survives a touchscreen. The naïve version
+// cancelled on *any* pointermove, so finger jitter killed the press before it
+// fired — on a phone it never triggered at all. Here the timer is only
+// cancelled once movement passes a small threshold (a real scroll), so a still
+// finger reliably reaches the hold.
+function attachLongPress(node, { onLongPress, onTap, canStart = () => true, delay = 450, moveTolerance = 10 }) {
   let timer = null;
   let longPressed = false;
+  let startX = 0;
+  let startY = 0;
   const clear = () => {
     if (timer) clearTimeout(timer);
     timer = null;
   };
-  tile.addEventListener("pointerdown", () => {
-    if (selection) return;
+  node.addEventListener("pointerdown", (e) => {
+    if (!canStart()) return;
     longPressed = false;
+    startX = e.clientX;
+    startY = e.clientY;
+    clear();
     timer = setTimeout(() => {
+      timer = null;
       longPressed = true;
-      enterSelection(book.id);
-    }, 450);
+      onLongPress();
+    }, delay);
   });
-  tile.addEventListener("pointerup", clear);
-  tile.addEventListener("pointermove", clear);
-  tile.addEventListener("pointerleave", clear);
-  tile.addEventListener("click", (e) => {
+  node.addEventListener("pointermove", (e) => {
+    if (!timer) return;
+    if (Math.abs(e.clientX - startX) > moveTolerance || Math.abs(e.clientY - startY) > moveTolerance) clear();
+  });
+  node.addEventListener("pointerup", clear);
+  node.addEventListener("pointercancel", clear);
+  node.addEventListener("pointerleave", clear);
+  node.addEventListener("click", (e) => {
     if (longPressed) {
       e.preventDefault();
+      e.stopPropagation();
       longPressed = false;
       return;
     }
-    if (selection) toggleSelect(book.id);
-    else openBook(book.id);
+    onTap();
+  });
+}
+
+function attachTileGestures(tile, book) {
+  attachLongPress(tile, {
+    canStart: () => !selection, // don't arm a new press while already selecting
+    onLongPress: () => enterSelection(book.id),
+    onTap: () => (selection ? toggleSelect(book.id) : openInfo("book", book.id)),
   });
 }
 
@@ -746,6 +1353,77 @@ function longestCommonName(titles) {
 }
 
 // =========================================================================
+// Deleting books — from the library (long-press → select → Delete) or from a
+// series (long-press a volume row). Removal is total: the stored epub, its
+// reading position and its cached cover URL all go. A series that drops below
+// two volumes is dissolved back into standalone books.
+// =========================================================================
+async function deleteBook(id) {
+  const b = bookById(id);
+  if (!b) return;
+
+  if (b.seriesId) {
+    const s = seriesById(b.seriesId);
+    if (s) {
+      s.bookIds = s.bookIds.filter((x) => x !== id);
+      if (s.bookIds.length < 2) {
+        for (const rid of s.bookIds) {
+          const rb = bookById(rid);
+          if (rb) {
+            rb.seriesId = null;
+            await dbPut("books", rb);
+          }
+        }
+        series = series.filter((x) => x.id !== s.id);
+        await dbDelete("series", s.id);
+      } else {
+        await dbPut("series", s);
+      }
+    }
+  }
+
+  books = books.filter((x) => x.id !== id);
+  delete progressMap[id];
+  if (coverUrls.has(id)) {
+    URL.revokeObjectURL(coverUrls.get(id));
+    coverUrls.delete(id);
+  }
+  if (ui.lastReadBookId === id) {
+    ui.lastReadBookId = null;
+    await saveUi();
+  }
+  await dbDelete("books", id);
+  await dbDelete("progress", id);
+}
+
+async function confirmDeleteSelection() {
+  const ids = [...selection];
+  if (!ids.length) return;
+  const many = ids.length > 1;
+  const ok = await showConfirmSheet(
+    many ? `Delete ${ids.length} books?` : "Delete this book?",
+    (many ? "They will be" : "It will be") + " removed from this device — the file and your place in it. This can't be undone.",
+    "Delete"
+  );
+  if (!ok) return;
+  for (const id of ids) await deleteBook(id); // eslint-disable-line no-await-in-loop
+  exitSelection(); // re-renders the library
+}
+
+async function confirmDeleteVolume(book) {
+  const ok = await showConfirmSheet(
+    "Delete this volume?",
+    `“${displayTitle(book)}” will be removed from this device — the file and your place in it. This can't be undone.`,
+    "Delete"
+  );
+  if (!ok) return;
+  const seriesId = book.seriesId;
+  await deleteBook(book.id);
+  if (seriesId && seriesById(seriesId)) renderInfo("series", seriesId);
+  else go({ route: "library" });
+}
+
+// =========================================================================
 // Sheets — suggestion (duplicate), name prompt.
 // =========================================================================
 function showSuggestSheet(name, count) {
@@ -763,6 +1441,22 @@ function showSuggestSheet(name, count) {
     el.suggestGroup.onclick = () => done(true);
     el.suggestKeep.onclick = () => done(false);
     el.suggestScrim.onclick = () => done(false);
+  });
+}
+function showConfirmSheet(title, body, confirmLabel) {
+  return new Promise((resolve) => {
+    el.confirmTitle.textContent = title;
+    el.confirmBody.textContent = body;
+    el.confirmOk.textContent = confirmLabel || "Delete";
+    el.confirmSheet.hidden = false;
+    const done = (val) => {
+      el.confirmSheet.hidden = true;
+      el.confirmOk.onclick = el.confirmCancel.onclick = el.confirmScrim.onclick = null;
+      resolve(val);
+    };
+    el.confirmOk.onclick = () => done(true);
+    el.confirmCancel.onclick = () => done(false);
+    el.confirmScrim.onclick = () => done(false);
   });
 }
 function showNameSheet(title, prefill, confirmLabel) {
@@ -797,12 +1491,13 @@ let currentBook = null; // the library book being read
 let flatToc = [];
 let currentHref = null;
 
-async function openBook(id) {
+async function openBook(id, { withDrawer = false } = {}) {
   const lib = bookById(id);
   if (!lib) return;
   currentBook = lib;
   go({ route: "reader", id }, true);
   await renderReader(lib);
+  if (withDrawer) openDrawer();
 }
 
 async function renderReader(lib) {
@@ -813,8 +1508,8 @@ async function renderReader(lib) {
   el.viewer.innerHTML = "";
   currentHref = null;
   updateChapterTitle(null);
-  el.topTitle.textContent = lib.title;
-  document.title = lib.title;
+  el.topTitle.textContent = displayTitle(lib);
+  document.title = displayTitle(lib);
 
   // Populate the drawer (current book + chapters) immediately from stored
   // metadata, so the menu is usable the moment it opens — independent of how
@@ -893,7 +1588,17 @@ function updateDrawerBook() {
   } else {
     el.drawerCover.hidden = true;
   }
-  el.drawerBookTitle.textContent = lib.title;
+  el.drawerBookTitle.textContent = displayTitle(lib);
+
+  // Tapping the book block returns to its info page — the series page for a
+  // volume, or the standalone book's own info page.
+  el.drawerBook.classList.add("drawer-book--link");
+  el.drawerBook.onclick = () => {
+    closeDrawer();
+    if (lib.seriesId && seriesById(lib.seriesId)) openInfo("series", lib.seriesId);
+    else openInfo("book", lib.id);
+  };
+
   const p = progressMap[lib.id];
   const n = (p ? p.chapterIndex + 1 : 1) + volumeChapterOffset(lib);
   const total = chapterCount(lib) + volumeChapterOffset(lib);
@@ -1071,17 +1776,17 @@ function setRouteChrome(route) {
 
 function renderCurrentRoute() {
   const route = document.getElementById("app").dataset.route;
-  if (route === "series" && currentSeriesId) renderSeries(currentSeriesId);
+  if (route === "info" && currentInfo) renderInfo(currentInfo.kind, currentInfo.id);
   else renderLibrary();
 }
 
-let currentSeriesId = null;
+let currentInfo = null; // { kind: "book" | "series", id } when on the info route
 
 // Apply a route state (without pushing history).
 async function applyState(state) {
   const s = state || { route: "library" };
   if (s.route === "reader" && s.id) {
-    currentSeriesId = null;
+    currentInfo = null;
     setRouteChrome("reader");
     const lib = bookById(s.id);
     if (lib) {
@@ -1090,12 +1795,12 @@ async function applyState(state) {
     } else {
       go({ route: "library" });
     }
-  } else if (s.route === "series" && s.id) {
-    currentSeriesId = s.id;
-    setRouteChrome("series");
-    renderSeries(s.id);
+  } else if (s.route === "info" && s.id) {
+    currentInfo = { kind: s.kind || "series", id: s.id };
+    setRouteChrome("info");
+    renderInfo(currentInfo.kind, currentInfo.id);
   } else {
-    currentSeriesId = null;
+    currentInfo = null;
     setRouteChrome("library");
     renderLibrary();
   }
@@ -1104,22 +1809,27 @@ async function applyState(state) {
 function go(state, push = true) {
   const cur = document.getElementById("app").dataset.route;
   if (state.route === "reader" && state.id) {
-    currentSeriesId = null;
+    currentInfo = null;
     setRouteChrome("reader");
-  } else if (state.route === "series" && state.id) {
-    currentSeriesId = state.id;
-    setRouteChrome("series");
-    renderSeries(state.id);
+  } else if (state.route === "info" && state.id) {
+    currentInfo = { kind: state.kind || "series", id: state.id };
+    setRouteChrome("info");
+    renderInfo(currentInfo.kind, currentInfo.id);
   } else {
-    currentSeriesId = null;
+    currentInfo = null;
     setRouteChrome("library");
     renderLibrary();
   }
   if (push && cur !== undefined) history.pushState(state, "");
   else history.replaceState(state, "");
 }
+function openInfo(kind, id) {
+  go({ route: "info", kind, id });
+}
+// Kept for callers that jump straight back to a series (e.g. the volume
+// boundary card).
 function openSeries(id) {
-  go({ route: "series", id });
+  openInfo("series", id);
 }
 window.addEventListener("popstate", (e) => applyState(e.state));
 
@@ -1198,7 +1908,7 @@ function collectRefs() {
     libSearch: "lib-search",
     libSearchRow: "lib-search-row",
     libSearchInput: "lib-search-input",
-    seriesScreen: "series-screen",
+    infoScreen: "info-screen",
     topTitle: "book-title",
     chapterTitle: "chapter-title",
     titleBlock: "title-block",
@@ -1219,6 +1929,7 @@ function collectRefs() {
     selectCancel: "select-cancel",
     selectCount: "select-count",
     selectGroup: "select-group",
+    selectDelete: "select-delete",
     suggestSheet: "suggest-sheet",
     suggestScrim: "suggest-scrim",
     suggestBody: "suggest-body",
@@ -1230,6 +1941,19 @@ function collectRefs() {
     nameInput: "name-input",
     nameConfirm: "name-confirm",
     nameCancel: "name-cancel",
+    confirmSheet: "confirm-sheet",
+    confirmScrim: "confirm-scrim",
+    confirmTitle: "confirm-title",
+    confirmBody: "confirm-body",
+    confirmOk: "confirm-ok",
+    confirmCancel: "confirm-cancel",
+    volumeSheet: "volume-sheet",
+    volumeScrim: "volume-scrim",
+    volumeCard: "volume-card",
+    actionSheet: "action-sheet",
+    actionScrim: "action-scrim",
+    actionCard: "action-card",
+    editor: "editor",
     installBar: "install-bar",
     installBarAction: "install-bar-action",
     installBarDismiss: "install-bar-dismiss",
@@ -1269,6 +1993,10 @@ function wireEvents() {
 
   el.selectCancel.addEventListener("click", exitSelection);
   el.selectGroup.addEventListener("click", confirmGrouping);
+  el.selectDelete.addEventListener("click", confirmDeleteSelection);
+
+  el.volumeScrim.addEventListener("click", hideVolumeSheet);
+  el.actionScrim.addEventListener("click", hideActionSheet);
 
   el.installBarAction.addEventListener("click", handleInstallClick);
   el.installBarDismiss.addEventListener("click", dismissInstallBar);
@@ -1282,6 +2010,10 @@ function wireEvents() {
 
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") {
+      if (!el.editor.hidden) return closeEditor();
+      if (!el.actionSheet.hidden) return hideActionSheet();
+      if (!el.volumeSheet.hidden) return hideVolumeSheet();
+      if (!el.confirmSheet.hidden) return el.confirmCancel.click();
       if (!el.installSheet.hidden) return (el.installSheet.hidden = true);
       if (selection) return exitSelection();
       if (el.drawer.classList.contains("open")) return closeDrawer();

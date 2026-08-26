@@ -38,9 +38,9 @@
       </section>
 
       <!-- =====================================================================
-           SERIES screen — populated by src/main.js.
+           INFO page (book / series detail) — populated by src/main.js.
            ================================================================== -->
-      <section id="series-screen" class="screen series-screen" hidden></section>
+      <section id="info-screen" class="screen info-screen" hidden></section>
 
       <!-- =====================================================================
            READER — chrome variant 1c. Top bar: burger · title · ‹ · ›.
@@ -103,6 +103,7 @@
         </button>
         <span id="select-count" class="select-bar__count">0 selected</span>
         <button id="select-group" class="select-bar__group">Group as series</button>
+        <button id="select-delete" class="select-bar__delete">Delete</button>
       </div>
 
       <!-- =====================================================================
@@ -131,6 +132,44 @@
           <div class="suggest-actions">
             <button id="name-confirm" class="pill-btn">Create series</button>
             <button id="name-cancel" class="text-btn">Cancel</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- =====================================================================
+           Full-screen editor overlay — Edit details / Series details.
+           Contents are built by src/main.js.
+           ================================================================== -->
+      <section id="editor" class="editor" hidden></section>
+
+      <!-- =====================================================================
+           Volume sheet (7a) — raised by tapping a volume row on the info page.
+           Card contents are built by src/main.js.
+           ================================================================== -->
+      <div id="volume-sheet" class="sheet" hidden>
+        <div class="sheet-scrim" id="volume-scrim"></div>
+        <div class="sheet-card sheet-card--plain" id="volume-card" role="dialog" aria-modal="true"></div>
+      </div>
+
+      <!-- =====================================================================
+           Action sheet — the ⋯ overflow menu on the info page.
+           ================================================================== -->
+      <div id="action-sheet" class="sheet" hidden>
+        <div class="sheet-scrim" id="action-scrim"></div>
+        <div class="sheet-card sheet-card--actions" id="action-card" role="dialog" aria-modal="true"></div>
+      </div>
+
+      <!-- =====================================================================
+           Confirm sheet — destructive actions (deleting a book / volume).
+           ================================================================== -->
+      <div id="confirm-sheet" class="sheet" hidden>
+        <div class="sheet-scrim" id="confirm-scrim"></div>
+        <div class="sheet-card" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
+          <h2 id="confirm-title" class="sheet-title">Delete this book?</h2>
+          <p id="confirm-body" class="suggest-body"></p>
+          <div class="suggest-actions">
+            <button id="confirm-ok" class="pill-btn pill-btn--danger">Delete</button>
+            <button id="confirm-cancel" class="text-btn">Cancel</button>
           </div>
         </div>
       </div>
