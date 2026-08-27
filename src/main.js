@@ -2786,24 +2786,33 @@ const updateSW = registerSW({
 });
 const applyUpdate = () => updateSW(true);
 
-// Manual "Check for updates" from the install sheet: force a server check and
+// Set the update-check status line (its own line under the version row).
+// kind: "ok" (green ✓), "err" (danger), or "" (neutral).
+function setUpdateStatus(text, kind = "") {
+  const s = el.updateStatus;
+  if (!s) return;
+  s.textContent = text;
+  s.classList.toggle("is-ok", kind === "ok");
+  s.classList.toggle("is-err", kind === "err");
+}
+
+// Manual "Check for updates" from the library footer: force a server check and
 // report the outcome. If nothing is installing/waiting afterwards, we're current.
 async function checkForUpdatesManually() {
-  const status = el.updateStatus;
-  if (!swRegistration) { if (status) status.textContent = "unavailable"; return; }
-  if (status) status.textContent = "checking…";
+  if (!swRegistration) { setUpdateStatus("Updates aren't available here", "err"); return; }
+  setUpdateStatus("Checking…");
   try {
     await swRegistration.update();
     if (!swRegistration.installing && !swRegistration.waiting) {
-      if (status) {
-        status.textContent = "up to date";
-        setTimeout(() => { if (status.textContent === "up to date") status.textContent = ""; }, 2500);
-      }
-    } else if (status) {
-      status.textContent = "";
+      const msg = "✓ You're up to date";
+      setUpdateStatus(msg, "ok");
+      setTimeout(() => { if (el.updateStatus?.textContent === msg) setUpdateStatus(""); }, 4000);
+    } else {
+      // An update is on its way — the banner takes over from here.
+      setUpdateStatus("");
     }
   } catch {
-    if (status) status.textContent = "check failed";
+    setUpdateStatus("Couldn't check — try again", "err");
   }
 }
 

@@ -1181,7 +1181,15 @@ html, body {
   cursor: pointer;
 }
 .lib-footer__ver button:hover { color: var(--text-muted); }
-.lib-footer__status { margin-left: 8px; color: var(--text-muted); }
+/* Update-check status sits on its own line under the version row; empty = no
+   gap (it only takes space once it has text). */
+.lib-footer__status {
+  display: block;
+  color: var(--text-muted);
+}
+.lib-footer__status:not(:empty) { margin-top: 5px; }
+.lib-footer__status.is-ok { color: #7fb894; }
+.lib-footer__status.is-err { color: var(--danger); }
 
 /* =========================================================================
    Update banner — a bottom toast shown when a newer app version has installed
