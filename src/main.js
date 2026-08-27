@@ -77,11 +77,44 @@ async function loadState() {
   series = seriesRows || [];
   for (const p of progRows || []) progressMap[p.bookId] = p;
   if (savedUi) ui = { ...ui, ...savedUi };
+  await migrateProgressRecords();
 }
 const saveUi = () => kvSet("ui", ui);
 async function putProgress(p) {
   progressMap[p.bookId] = p;
   await dbPut("progress", p);
+}
+// One-time upgrade for progress written before per-chapter tracking: synthesize
+// a `chapters` map from the old furthest-opened index + within-chapter %.
+// Chapters before the furthest become read; the furthest one becomes in
+// progress. The upgraded record is persisted, so this runs once per book.
+async function migrateProgressRecords() {
+  for (const b of books) {
+    const p = progressMap[b.id];
+    if (!p || p.chapters) continue;
+    const chs = b.chapters || [];
+    const M = p.maxChapterIndex ?? p.chapterIndex ?? -1;
+    const map = {};
+    for (let i = 0; i < chs.length; i++) {
+      if (isFrontMatter(chs[i].label)) continue;
+      const key = baseHref(chs[i].href);
+      if (!key) continue;
+      if (p.finished || i < M) map[key] = { pct: 100, cfi: null, done: true };
+      else if (i === M) {
+        const pct = p.chapterPercent ?? 0;
+        map[key] = { pct, cfi: p.cfi || null, done: pct >= CHAPTER_DONE_PCT };
+      }
+    }
+    await putProgress({
+      bookId: b.id,
+      cfi: p.cfi || null,
+      chapterIndex: p.chapterIndex ?? Math.max(0, M),
+      chapterLabel: p.chapterLabel || "",
+      chapters: map,
+      finished: !!p.finished,
+      updatedAt: p.updatedAt || Date.now(),
+    });
+  }
 }
 
 // -------------------------------------------------------------------------
@@ -181,43 +214,48 @@ function chapterOrdinalFor(book, p) {
   if (i >= 0) return i + 1;
   return Math.max(1, (p.chapterIndex ?? 0) + 1 - frontMatterCount(book));
 }
-// The furthest chapter ever reached in this book. Progress is measured from
-// here (not the current resume point), so jumping *back* into an earlier
-// chapter never lowers the reported percentage. Records written before this
-// existed fall back to the current chapter.
-function furthestIndex(book) {
-  const p = progressMap[book.id];
-  if (!p) return -1;
-  return Math.max(p.maxChapterIndex ?? -1, p.chapterIndex ?? 0);
+// A chapter is "read" once you reach its end. We can't count on the very last
+// pixel scrolling into view (trailing whitespace, the injected end-of-chapter
+// card), so anything at or past this fraction counts as complete.
+const CHAPTER_DONE_PCT = 92;
+// Strip the fragment from an href so a spine section and its TOC anchor share a
+// key. Defined here (not down in the reader) because the per-chapter progress
+// map below is keyed by it.
+const baseHref = (href) => (href || "").split("#")[0];
+
+// -------------------------------------------------------------------------
+// Per-chapter progress. Each book's progress record carries a `chapters` map
+// keyed by chapter href: { pct, cfi, done }. `pct` is the furthest fraction
+// read within the chapter (monotonic), `cfi` the position at that furthest
+// point (for the per-chapter resume), `done` sticky once the end is reached.
+// Completion — the "read" checkmarks and book % — is measured from this map,
+// not from where you happen to be resuming, so jumping back never un-reads a
+// chapter and merely *opening* a chapter never completes it.
+// -------------------------------------------------------------------------
+function chapterProgress(book, href) {
+  const p = progressMap[book?.id];
+  const h = baseHref(href);
+  return p && p.chapters && h ? p.chapters[h] || null : null;
 }
-// The furthest chapter reached, as a 1-based ordinal over the readable TOC (the
-// same basis chapterOrdinalFor uses for the resume point). This drives the
-// read/unread checkmarks, so jumping *back* into an earlier chapter never
-// un-checks the ones beyond it — completion is measured from the high-water
-// mark, only the "current" marker follows where you stopped.
-//
-// furthestIndex is a *spine* index (front matter included); the readable TOC has
-// front matter removed. Map between them by counting the readable entries at or
-// before that spine position, so only front matter that actually precedes the
-// chapter is discounted — subtracting the whole book's front-matter count would
-// under-report whenever a licence/boilerplate page trails the real chapters.
-function furthestOrdinalFor(book) {
-  const fi = furthestIndex(book);
-  if (fi < 0) return 0;
-  const chs = book.chapters || [];
-  let ord = 0;
-  for (let i = 0; i <= fi && i < chs.length; i++) if (!isFrontMatter(chs[i].label)) ord++;
-  const len = readableChapters(chs).length || Infinity;
-  return Math.min(len, Math.max(1, ord));
+function chapterDone(book, href) {
+  const st = chapterProgress(book, href);
+  return !!(st && st.done);
+}
+// Number of readable chapters completed in this book.
+function doneCount(book) {
+  const p = progressMap[book?.id];
+  if (!p || !p.chapters) return 0;
+  let n = 0;
+  for (const e of readableChapters(book.chapters || [])) if (p.chapters[baseHref(e.href)]?.done) n++;
+  return n;
 }
 function bookPercent(book) {
   const p = progressMap[book.id];
-  if (p?.finished) return 100;
   if (!p) return 0;
-  // furthestIndex is a spine index, so measure against the spine total (which
-  // includes front matter) to keep numerator and denominator on the same basis.
-  const total = book.spineCount || chapterCount(book);
-  return Math.min(100, Math.round(((furthestIndex(book) + 1) / total) * 100));
+  if (p.finished) return 100;
+  const total = chapterCount(book);
+  if (!total) return 0;
+  return Math.min(100, Math.round((doneCount(book) / total) * 100));
 }
 function bookIsStarted(book) {
   return !!progressMap[book.id];
@@ -1407,8 +1445,21 @@ function setChSortDir(kind, id, dir) {
 }
 
 // Build the flat, absolutely-numbered chapter list for a book or a whole
-// series, tagging each row read / unread / current. Chapters before the
-// reading position are read; the one you are on is current; the rest unread.
+// series, tagging each row by its per-chapter state: `read` (completed),
+// `current` (the resume chapter — where "Continue" drops you), `reading` (a
+// chapter opened partway but not finished, and not the resume point) or
+// `unread`. Completion comes from the per-chapter map, so jumping back never
+// un-reads a chapter and opening one never completes it.
+function chapterRowState({ vol, e, i, curLocal, isCurVol, finished }) {
+  const st = chapterProgress(vol, e.href);
+  const pct = st?.pct || 0;
+  let state;
+  if (finished || st?.done) state = "read";
+  else if (isCurVol && i === curLocal) state = "current";
+  else if (pct > 0) state = "reading";
+  else state = "unread";
+  return { state, pct };
+}
 function chaptersModel(kind, id) {
   if (kind === "series") {
     const s = seriesById(id);
@@ -1422,24 +1473,17 @@ function chaptersModel(kind, id) {
       const chs = readableChapters(vol.chapters || []);
       const offset = volumeChapterOffset(vol);
       const finished = bookPercent(vol) >= 100;
-      const started = bookIsStarted(vol);
-      // Read up to the furthest chapter reached (not the resume point); the
-      // "current" marker is the resume point, shown only on the reading volume.
-      const furthestLocal = furthestOrdinalFor(vol) - 1;
+      const isCurVol = !!(cur && vol.id === cur.id);
       chs.forEach((e, i) => {
-        let state;
-        if (finished) state = "read";
-        else if (!started) state = "unread";
-        else if (cur && vol.id === cur.id && i === curLocal) state = "current";
-        else state = i <= furthestLocal ? "read" : "unread";
-        items.push({ absNum: offset + i + 1, label: e.label, href: e.href, bookId: vol.id, localIndex: i, state });
+        const { state, pct } = chapterRowState({ vol, e, i, curLocal, isCurVol, finished });
+        items.push({ absNum: offset + i + 1, label: e.label, href: e.href, bookId: vol.id, localIndex: i, state, pct });
       });
     }
     const curItem = items.find((it) => it.state === "current");
     return {
       kind, id, series: s, vols, book: null, title: s.name, items,
       currentAbs: curItem ? curItem.absNum : null,
-      currentPercent: cur ? progressMap[cur.id]?.chapterPercent : undefined,
+      currentPercent: curItem ? curItem.pct : undefined,
     };
   }
   const b = bookById(id);
@@ -1447,23 +1491,16 @@ function chaptersModel(kind, id) {
   const chs = readableChapters(b.chapters || []);
   const p = progressMap[b.id];
   const finished = bookPercent(b) >= 100;
-  const started = bookIsStarted(b);
   const curLocal = p ? chapterOrdinalFor(b, p) - 1 : -1;
-  // Read up to the furthest chapter reached; "current" marks the resume point.
-  const furthestLocal = furthestOrdinalFor(b) - 1;
   const items = chs.map((e, i) => {
-    let state;
-    if (finished) state = "read";
-    else if (!started) state = "unread";
-    else if (i === curLocal) state = "current";
-    else state = i <= furthestLocal ? "read" : "unread";
-    return { absNum: i + 1, label: e.label, href: e.href, bookId: b.id, localIndex: i, state };
+    const { state, pct } = chapterRowState({ vol: b, e, i, curLocal, isCurVol: true, finished });
+    return { absNum: i + 1, label: e.label, href: e.href, bookId: b.id, localIndex: i, state, pct };
   });
   const curItem = items.find((it) => it.state === "current");
   return {
     kind, id, series: null, vols: null, book: b, title: displayTitle(b), items,
     currentAbs: curItem ? curItem.absNum : null,
-    currentPercent: progressMap[b.id]?.chapterPercent,
+    currentPercent: curItem ? curItem.pct : undefined,
   };
 }
 
@@ -1493,18 +1530,19 @@ function previewWindow(items) {
 }
 
 function cprevRow(it) {
+  // The resume chapter reopens the book where you left off; every other row
+  // opens that chapter (an in-progress one offers its own resume once inside).
   const open = () => (it.state === "current" ? openBook(it.bookId) : openBook(it.bookId, { startHref: it.href }));
-  if (it.state === "current") {
-    const pct = progressMap[it.bookId]?.chapterPercent;
+  if (it.state === "current" || it.state === "reading") {
     return h(
       "button",
-      { class: "cprev__row cprev__row--current", onclick: open },
+      { class: "cprev__row cprev__row--" + it.state, onclick: open },
       h("span", { class: "cprev__num" }, String(it.absNum)),
       h(
         "span",
         { class: "cprev__titlewrap" },
         h("div", { class: "cprev__title" }, it.label || "Untitled"),
-        h("div", { class: "cprev__sub" }, pct != null ? `Reading · ${pct} % through` : "Reading")
+        h("div", { class: "cprev__sub" }, it.pct ? `Reading · ${it.pct} % through` : "Reading")
       )
     );
   }
@@ -1726,17 +1764,16 @@ function updateChapterList(m, scrollToCurrent = false) {
 
 function chRow(m, it) {
   const cls = "ch-row ch-row--" + it.state;
-  if (it.state === "current") {
-    const pct = m.currentPercent;
+  if (it.state === "current" || it.state === "reading") {
     return h(
       "button",
-      { class: cls, dataset: { current: "1" }, onclick: () => chOpen(it) },
+      { class: cls, dataset: it.state === "current" ? { current: "1" } : {}, onclick: () => chOpen(it) },
       h("span", { class: "ch-row__num" }, String(it.absNum)),
       h(
         "span",
         { class: "ch-row__title-wrap" },
         h("div", { class: "ch-row__title" }, it.label || "Untitled"),
-        h("div", { class: "ch-row__sub" }, pct != null ? `Reading · ${pct} % through` : "Reading")
+        h("div", { class: "ch-row__sub" }, it.pct ? `Reading · ${it.pct} % through` : "Reading")
       )
     );
   }
@@ -2076,6 +2113,11 @@ let rendition = null;
 let currentBook = null; // the library book being read
 let flatToc = [];
 let currentHref = null;
+// Per-chapter resume chip: the chapters the reader has dismissed it for this
+// session, plus the live chip element and the chapter it belongs to.
+let resumeDismissed = new Set();
+let resumeChipEl = null;
+let resumeChipHref = null;
 
 // Persist an epub.js location as the current reading position. Called on every
 // `relocated` while scrolling, and once more when the app is backgrounded so
@@ -2085,24 +2127,42 @@ function saveReadingLocation(location) {
   const lib = currentBook;
   if (!lib || !location?.start) return;
   const idx = typeof location.start.index === "number" ? location.start.index : 0;
-  const total = book?.spine?.spineItems?.length || chapterCount(lib);
+  const href = baseHref(location.start.href || currentHref);
   const prev = progressMap[lib.id];
-  // Furthest-reached: the recorded high-water mark only ever rises, and once
-  // a book is finished it stays finished even if you reopen an early chapter.
-  const maxChapterIndex = Math.max(prev?.maxChapterIndex ?? -1, idx);
-  const finished = prev?.finished || (total > 0 && maxChapterIndex >= total - 1);
-  // Best-effort progress *within* the current chapter, for the Chapters
-  // screen's "Reading · N % through" line. Not all layouts expose it.
+
+  // Progress within the chapter you're on (0–100). Not every layout exposes it;
+  // when it's missing we keep whatever we already had for this chapter.
   const disp = location.start.displayed;
-  const chapterPercent =
-    disp && disp.total ? Math.min(100, Math.max(0, Math.round((disp.page / disp.total) * 100))) : prev?.chapterPercent;
+  const rawPct =
+    disp && disp.total ? Math.min(100, Math.max(0, Math.round((disp.page / disp.total) * 100))) : null;
+
+  // Fold this position into the per-chapter map. pct only ever rises; the stored
+  // cfi tracks the furthest point (so the per-chapter resume lands where you got
+  // to, not where you scrolled back to); done is sticky once the end is reached.
+  const chapters = { ...(prev?.chapters || {}) };
+  if (href) {
+    const cur = chapters[href] || { pct: 0, cfi: null, done: false };
+    const pct = rawPct == null ? cur.pct || 0 : Math.max(cur.pct || 0, rawPct);
+    const advanced = rawPct != null && rawPct >= (cur.pct || 0);
+    chapters[href] = {
+      pct,
+      cfi: advanced && location.start.cfi ? location.start.cfi : cur.cfi || location.start.cfi || null,
+      done: cur.done || pct >= CHAPTER_DONE_PCT,
+    };
+  }
+
+  // A book is finished once every readable chapter is done; the flag is sticky.
+  const total = chapterCount(lib);
+  const readableHrefs = readableChapters(lib.chapters || []).map((e) => baseHref(e.href));
+  const nDone = readableHrefs.filter((h) => chapters[h]?.done).length;
+  const finished = prev?.finished || (total > 0 && nDone >= total);
+
   putProgress({
     bookId: lib.id,
-    cfi: location.start.cfi || null,
+    cfi: location.start.cfi || null, // book-level resume: where you are right now
     chapterIndex: idx,
-    maxChapterIndex,
-    chapterLabel: chapterLabelFor(location.start.href || currentHref) || prev?.chapterLabel || "",
-    chapterPercent,
+    chapterLabel: chapterLabelFor(href) || prev?.chapterLabel || "",
+    chapters,
     finished,
     updatedAt: Date.now(),
   });
@@ -2143,6 +2203,9 @@ async function renderReader(lib, startHref = null) {
   }
   el.viewer.innerHTML = "";
   currentHref = null;
+  // Fresh book: forget any resume-chip dismissals and clear a stale chip.
+  resumeDismissed = new Set();
+  hideResumeChip();
   updateChapterTitle(null);
   el.topTitle.textContent = displayTitle(lib);
   document.title = displayTitle(lib);
@@ -2184,7 +2247,10 @@ async function renderReader(lib, startHref = null) {
   const p = progressMap[lib.id];
   let resume = p?.cfi;
   if (!resume && p?.chapterLabel) resume = flatToc.find((e) => e.label === p.chapterLabel)?.href;
-  rendition.display(startHref || resume || flatToc[0]?.href || undefined);
+  // A chapter tapped in the list/drawer opens at its top and offers the
+  // per-chapter resume chip; the book-level "Continue" restores the exact CFI.
+  if (startHref) displayChapterTop(startHref);
+  else rendition.display(resume || flatToc[0]?.href || undefined);
 
   // Refine the chapter list once the live navigation resolves (accurate hrefs).
   book.loaded.navigation.then((nav) => {
@@ -2195,6 +2261,8 @@ async function renderReader(lib, startHref = null) {
 
   rendition.on("relocated", (location) => {
     currentHref = location?.start?.href || null;
+    // A move to a different chapter retires a resume chip meant for the old one.
+    if (resumeChipHref && baseHref(currentHref) !== resumeChipHref) hideResumeChip();
     // Re-render the drawer list so read-state and the highlight track the move.
     renderToc();
     updateChapterTitle(currentHref);
@@ -2266,43 +2334,47 @@ function updateDrawerBook() {
 
 // The drawer lists every chapter of the current book (the current volume, for
 // a book inside a series). The list scrolls within the drawer and is scrolled
-// to the current chapter on open via highlightToc. Chapters up to the furthest
-// one ever reached are marked read — dimmed with a check — to match the full
-// Chapters screen and its previews; jumping *back* into an earlier chapter never
-// un-checks the ones beyond it. The chapter you're on keeps its highlight (via
-// highlightToc) instead of a check, and anything past the furthest mark reads as
-// unread. For a book inside a series the rows carry absolute numbers, so
-// "Ch. 351" in vol. 2 stays "Ch. 351".
+// to the current chapter on open via highlightToc. Completed chapters are dimmed
+// with a check; a chapter opened partway shows its % ; the chapter you're on
+// keeps its highlight (via highlightToc). Read-state comes from the per-chapter
+// map, so jumping back never un-checks a chapter and opening one never completes
+// it. For a book inside a series the rows carry absolute numbers, so "Ch. 351"
+// in vol. 2 stays "Ch. 351".
 function renderToc() {
   el.tocList.innerHTML = "";
   const total = flatToc.length;
   if (!total) return;
   const inSeries = !!(currentBook?.seriesId && seriesById(currentBook.seriesId));
   const offset = inSeries ? volumeChapterOffset(currentBook) : 0;
-  const curBase = baseHref(currentHref);
-  const curIdx = curBase ? flatToc.findIndex((e) => baseHref(e.href) === curBase) : -1;
-  const furthestLocal = currentBook ? furthestOrdinalFor(currentBook) - 1 : -1;
   for (let i = 0; i < total; i++) {
     const entry = flatToc[i];
     const text = entry.label || "Untitled";
     const label = inSeries ? `${offset + i + 1} · ${text}` : text;
-    const read = i !== curIdx && i <= furthestLocal;
-    const cls = "toc-item" + (entry.depth ? " depth-" + Math.min(entry.depth, 2) : "") + (read ? " toc-item--read" : "");
+    const st = chapterProgress(currentBook, entry.href);
+    const read = !!st?.done;
+    const reading = !read && (st?.pct || 0) > 0;
+    const cls =
+      "toc-item" +
+      (entry.depth ? " depth-" + Math.min(entry.depth, 2) : "") +
+      (read ? " toc-item--read" : reading ? " toc-item--reading" : "");
     const btn = h(
       "button",
       { dataset: { href: entry.href }, class: cls },
       h("span", { class: "toc-item__label" }, label),
-      read ? h("span", { class: "toc-item__check" }, svg(ICON.check)) : null
+      read
+        ? h("span", { class: "toc-item__check" }, svg(ICON.check))
+        : reading
+        ? h("span", { class: "toc-item__pct" }, `${st.pct} %`)
+        : null
     );
     btn.addEventListener("click", () => {
-      rendition.display(entry.href);
+      displayChapterTop(entry.href);
       closeDrawer();
     });
     el.tocList.append(h("li", null, btn));
   }
   highlightToc(currentHref);
 }
-const baseHref = (href) => (href || "").split("#")[0];
 // How many chapters of already-read context to keep above the current one when
 // the drawer settles, so the current chapter always lands near the top with a
 // short lead-in — the same framing whether you resumed at your furthest point
@@ -2343,7 +2415,60 @@ function goChapter(delta) {
   if (!rendition || !flatToc.length) return;
   const i = currentTocIndex();
   const target = flatToc[(i < 0 ? 0 : i) + delta];
-  if (target) rendition.display(target.href);
+  if (target) displayChapterTop(target.href);
+}
+// Open a chapter at its top (a deliberate jump from the drawer, the chapter
+// list, or the arrows), then — if that chapter was left part-read — offer the
+// per-chapter resume chip. The book-level "Continue" resume is separate: it
+// restores the exact CFI directly, so it never routes through here.
+function displayChapterTop(href) {
+  if (!rendition || !href) return;
+  const p = rendition.display(baseHref(href));
+  Promise.resolve(p).then(() => maybeShowResumeChip(href)).catch(() => {});
+}
+// Show the per-chapter resume chip if this chapter was left partway (has a saved
+// position short of the end) and the reader hasn't dismissed it this session.
+function maybeShowResumeChip(href) {
+  const key = baseHref(href);
+  const st = chapterProgress(currentBook, key);
+  if (!st || st.done || !st.cfi || !(st.pct > 0) || st.pct >= CHAPTER_DONE_PCT || resumeDismissed.has(key)) {
+    hideResumeChip();
+    return;
+  }
+  hideResumeChip();
+  resumeChipHref = key;
+  const go = h(
+    "button",
+    {
+      class: "resume-chip__go",
+      onclick: () => {
+        if (rendition && st.cfi) rendition.display(st.cfi);
+        hideResumeChip();
+      },
+    },
+    h("span", { class: "resume-chip__label" }, "Resume where you left off"),
+    h("span", { class: "resume-chip__pct" }, `${st.pct} %`)
+  );
+  const dismiss = h(
+    "button",
+    {
+      class: "resume-chip__x",
+      "aria-label": "Dismiss",
+      onclick: () => {
+        resumeDismissed.add(key);
+        hideResumeChip();
+      },
+    },
+    "×"
+  );
+  resumeChipEl = h("div", { class: "resume-chip" }, go, dismiss);
+  document.getElementById("app").appendChild(resumeChipEl);
+  requestAnimationFrame(() => resumeChipEl && resumeChipEl.classList.add("resume-chip--in"));
+}
+function hideResumeChip() {
+  if (resumeChipEl) resumeChipEl.remove();
+  resumeChipEl = null;
+  resumeChipHref = null;
 }
 function updateChapterTitle(href) {
   const label = href ? chapterLabelFor(href) : "";
@@ -2699,6 +2824,9 @@ async function seedDemoLibrary() {
     });
   }
 
+  // Seeded records are written in the legacy shape; upgrade them to the
+  // per-chapter map now so progress shows without waiting for a reload.
+  await migrateProgressRecords();
   renderCurrentRoute();
 }
 

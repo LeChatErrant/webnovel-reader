@@ -722,8 +722,65 @@ html, body {
 /* Read — dimmed label with a check, matching the full Chapters list. */
 .toc-list .toc-item--read { color: var(--text-dim); }
 .toc-list .toc-item__check { flex: none; color: #4f5763; display: inline-flex; }
+/* Opened partway: show the chapter's % instead of a check. */
+.toc-list .toc-item__pct { flex: none; font: 500 11px var(--font-ui); color: #5a6270; }
 .toc-list .depth-1 { padding-left: 34px; font-size: 13px; opacity: 0.92; }
 .toc-list .depth-2 { padding-left: 50px; font-size: 13px; opacity: 0.85; }
+
+/* Per-chapter resume chip — floats at the bottom of the reader when you reopen
+   a chapter you left partway. Dismissible; never blocks the whole width. */
+.resume-chip {
+  position: fixed;
+  left: 50%;
+  bottom: calc(18px + env(safe-area-inset-bottom));
+  transform: translate(-50%, 12px);
+  display: flex;
+  align-items: stretch;
+  max-width: calc(100vw - 32px);
+  background: #2a3140;
+  border: 1px solid var(--border-2f);
+  border-radius: 999px;
+  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.4);
+  opacity: 0;
+  transition: opacity 0.22s ease, transform 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+  z-index: 70;
+  overflow: hidden;
+}
+.resume-chip--in { opacity: 1; transform: translate(-50%, 0); }
+.resume-chip__go {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--text-primary);
+  font: 500 13.5px var(--font-ui);
+  padding: 11px 8px 11px 18px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  min-width: 0;
+}
+.resume-chip__label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.resume-chip__pct {
+  flex: none;
+  font-weight: 600;
+  color: var(--text-body);
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+.resume-chip__x {
+  appearance: none;
+  border: 0;
+  border-left: 1px solid var(--border-2f);
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 20px;
+  line-height: 1;
+  padding: 0 15px;
+  cursor: pointer;
+}
+.resume-chip__x:hover { color: var(--text-secondary); }
 
 .scrim {
   position: fixed;
@@ -1273,6 +1330,10 @@ html, body {
 }
 .ch-row--current .ch-row__num { width: 32px; font-weight: 600; color: var(--text-body); }
 .ch-row--current .ch-row__title { color: var(--text-primary); font-weight: 600; white-space: normal; }
+/* In-progress row on the full Chapters screen: subtler than current, with the
+   "Reading · N %" sub-line. */
+.ch-row--reading { border-left: 2px solid #3a4350; }
+.ch-row--reading .ch-row__title { color: var(--text-secondary); white-space: normal; }
 .ch-row__title-wrap { flex: 1 1 auto; min-width: 0; }
 
 /* Empty search result — one line, no illustration. */
@@ -1363,6 +1424,10 @@ html, body {
 }
 .cprev__row--current .cprev__num { color: var(--text-body); font-weight: 600; }
 .cprev__row--current .cprev__title { color: #eef1f5; font-weight: 600; }
+/* In-progress (opened partway, not the resume point): a lighter cue than the
+   current row, and it carries a "Reading · N %" sub-line. */
+.cprev__row--reading { border-left: 2px solid #3a4350; padding-left: 22px; }
+.cprev__row--reading .cprev__title { color: var(--text-secondary); }
 .cprev__seeall {
   appearance: none;
   width: 100%;
