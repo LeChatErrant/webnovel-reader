@@ -204,7 +204,26 @@
             <li>Tap <strong>Add</strong>, then launch it from your Home Screen.</li>
           </ol>
           <button id="install-sheet-close" class="pill-btn">Got it</button>
+          <p class="sheet-version">
+            Version <span id="app-version">—</span>
+            <button id="check-update" type="button">Check for updates</button>
+            <span id="update-status" class="sheet-version__status" role="status"></span>
+          </p>
         </div>
+      </div>
+
+      <!-- =====================================================================
+           Update banner — appears when a newer app version has installed in
+           the background and is waiting to take over. "Downloading…" while the
+           new worker installs, "ready" once it is waiting; Reload activates it.
+           ================================================================== -->
+      <div id="update-banner" class="update-banner" role="status" hidden>
+        <span class="update-banner__dot" aria-hidden="true"></span>
+        <span id="update-banner-text" class="update-banner__text">A new version is ready.</span>
+        <button id="update-reload" class="update-banner__btn" type="button">Reload</button>
+        <button id="update-dismiss" class="update-banner__close" type="button" aria-label="Dismiss">
+          <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+        </button>
       </div>
 
       <input id="file-input" type="file" accept=".epub,application/epub+zip" multiple hidden />

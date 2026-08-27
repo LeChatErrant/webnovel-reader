@@ -1,4 +1,5 @@
 import ePub from "epubjs";
+import { registerSW } from "virtual:pwa-register";
 import "./style.css";
 
 // =========================================================================
@@ -2720,6 +2721,88 @@ window.addEventListener("appinstalled", () => {
   el.installSheet.hidden = true;
 });
 
+// =========================================================================
+// App updates. The service worker (vite-plugin-pwa, "prompt" mode) checks the
+// server for a newer build on load, on every focus, and hourly. When one
+// finishes installing it *waits* instead of taking over mid-read; we surface
+// that as a bottom banner. "Reload" tells the waiting worker to activate
+// (skipWaiting) and refreshes once it controls the page.
+//
+// What the browser gives us, and where it stops:
+//   • "installing"  — the registration's `updatefound` fires (reg.installing).
+//   • "out of date" — a worker is waiting (surfaced as onNeedRefresh below).
+//   • the version    — baked in at build time (__APP_VERSION__); there is no
+//                      browser API for it, and no way to learn the server's
+//                      latest without the update fetch we already do.
+// Installed iOS PWAs never check in the background, so we poll on focus.
+// =========================================================================
+const APP_VERSION = __APP_VERSION__;
+let swRegistration = null;
+
+function showUpdateBanner({ installing = false } = {}) {
+  if (!el.updateBanner) return;
+  el.updateBanner.hidden = false;
+  el.updateBanner.classList.toggle("is-installing", installing);
+  el.updateText.textContent = installing ? "Downloading a new version…" : "A new version is ready.";
+  el.updateReload.hidden = installing;
+}
+function hideUpdateBanner() {
+  if (el.updateBanner) el.updateBanner.hidden = true;
+}
+
+// registerSW handles the waiting/reload plumbing; calling updateSW(true)
+// activates the waiting worker and reloads the page.
+const updateSW = registerSW({
+  immediate: true,
+  // A new worker has installed and is waiting — the app is now out of date.
+  onNeedRefresh() {
+    showUpdateBanner({ installing: false });
+  },
+  onRegisteredSW(swUrl, reg) {
+    if (!reg) return;
+    swRegistration = reg;
+    // The "currently installing" phase, which registerSW itself doesn't expose.
+    reg.addEventListener("updatefound", () => {
+      const sw = reg.installing;
+      if (!sw) return;
+      // Announce updates, not the very first install (no controller yet).
+      if (!navigator.serviceWorker.controller) return;
+      showUpdateBanner({ installing: true });
+      sw.addEventListener("statechange", () => {
+        if (sw.state === "installed") showUpdateBanner({ installing: false });
+      });
+    });
+    // Poll for a fresh build on focus and hourly — a long-lived installed
+    // session (especially on iOS) would otherwise never notice a deploy.
+    const check = () => { if (!document.hidden) reg.update().catch(() => {}); };
+    window.addEventListener("focus", check);
+    document.addEventListener("visibilitychange", check);
+    setInterval(check, 60 * 60 * 1000);
+  },
+});
+const applyUpdate = () => updateSW(true);
+
+// Manual "Check for updates" from the install sheet: force a server check and
+// report the outcome. If nothing is installing/waiting afterwards, we're current.
+async function checkForUpdatesManually() {
+  const status = el.updateStatus;
+  if (!swRegistration) { if (status) status.textContent = "unavailable"; return; }
+  if (status) status.textContent = "checking…";
+  try {
+    await swRegistration.update();
+    if (!swRegistration.installing && !swRegistration.waiting) {
+      if (status) {
+        status.textContent = "up to date";
+        setTimeout(() => { if (status.textContent === "up to date") status.textContent = ""; }, 2500);
+      }
+    } else if (status) {
+      status.textContent = "";
+    }
+  } catch {
+    if (status) status.textContent = "check failed";
+  }
+}
+
 // -------------------------------------------------------------------------
 // File picking
 // -------------------------------------------------------------------------
@@ -2925,6 +3008,13 @@ function collectRefs() {
     installSheet: "install-sheet",
     installScrim: "install-scrim",
     installSheetClose: "install-sheet-close",
+    appVersion: "app-version",
+    checkUpdate: "check-update",
+    updateStatus: "update-status",
+    updateBanner: "update-banner",
+    updateText: "update-banner-text",
+    updateReload: "update-reload",
+    updateDismiss: "update-dismiss",
     fileInput: "file-input",
   };
   for (const [k, id] of Object.entries(ids)) el[k] = document.getElementById(id);
@@ -2973,6 +3063,11 @@ function wireEvents() {
   el.installNote.addEventListener("click", handleInstallClick);
   el.installScrim.addEventListener("click", () => (el.installSheet.hidden = true));
   el.installSheetClose.addEventListener("click", () => (el.installSheet.hidden = true));
+
+  if (el.appVersion) el.appVersion.textContent = APP_VERSION;
+  el.checkUpdate?.addEventListener("click", checkForUpdatesManually);
+  el.updateReload?.addEventListener("click", applyUpdate);
+  el.updateDismiss?.addEventListener("click", hideUpdateBanner);
 
   el.fileInput.addEventListener("change", (e) => {
     importFiles(e.target.files);

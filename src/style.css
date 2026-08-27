@@ -1155,6 +1155,90 @@ html, body {
 .install-note:hover { color: var(--text-secondary); }
 .install-note svg { flex: 0 0 auto; }
 
+/* Version line + "Check for updates" inside the install sheet. */
+.sheet-version {
+  margin: 16px 0 0;
+  font: 400 11.5px var(--font-ui);
+  color: var(--text-dimmest);
+  text-align: center;
+}
+.sheet-version button {
+  appearance: none;
+  border: 0;
+  padding: 0;
+  margin-left: 8px;
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.sheet-version button:hover { color: var(--text-muted); }
+.sheet-version__status { margin-left: 8px; color: var(--text-muted); }
+
+/* =========================================================================
+   Update banner — a bottom toast shown when a newer app version has installed
+   in the background. `.is-installing` (pulsing dot, no Reload) while the new
+   worker downloads; the resting state once it is waiting to take over.
+   ========================================================================= */
+.update-banner {
+  position: fixed;
+  left: 50%;
+  bottom: calc(14px + env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: max-content;
+  max-width: min(420px, calc(100vw - 24px));
+  padding: 9px 9px 9px 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: 0 10px 34px rgba(0, 0, 0, 0.5);
+  color: var(--text-body);
+  font: 500 13px var(--font-ui);
+}
+.update-banner[hidden] { display: none; }
+.update-banner__dot {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #6ea8fe;
+}
+.update-banner.is-installing .update-banner__dot { animation: update-pulse 1s ease-in-out infinite; }
+@keyframes update-pulse { 0%, 100% { opacity: 0.3; } 50% { opacity: 1; } }
+.update-banner__text { flex: 1 1 auto; }
+.update-banner__btn {
+  flex: 0 0 auto;
+  appearance: none;
+  border: 0;
+  border-radius: 8px;
+  padding: 7px 13px;
+  background: var(--pill);
+  color: var(--text-primary);
+  font: 600 12.5px var(--font-ui);
+  cursor: pointer;
+}
+.update-banner__btn:hover { background: var(--row-current); }
+.update-banner__btn[hidden] { display: none; }
+.update-banner__close {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  appearance: none;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+.update-banner__close:hover { color: var(--text-secondary); background: var(--pill); }
+
 /* =========================================================================
    CHAPTERS screen (8a) — a pushed, searchable, virtualised chapter list.
    A fixed header block (bar · search · volume chips) over a scrolling list
