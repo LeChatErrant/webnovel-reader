@@ -274,6 +274,8 @@ html, body {
   overflow: hidden;
 }
 .tile__meta { margin-top: 2px; font-size: 11px; color: var(--text-dimmest); }
+/* Colliding look-alike (11c): the disambiguating "Vol. N ·" / "Added … ·" prefix. */
+.tile__meta-vol { color: var(--fill-card); }
 .tile__check {
   position: absolute;
   top: 6px;
@@ -310,6 +312,20 @@ html, body {
   padding: 2px 6px;
   border-radius: 9px;
   background: rgba(10, 12, 16, 0.72);
+  font: 600 10px var(--font-ui);
+  color: #dfe3e9;
+}
+/* Collision numeral (11c) — OUTLINED, so it can never be mistaken for the
+   filled series volume-count badge above. */
+.vol-pill {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  z-index: 3;
+  padding: 1px 6px;
+  border-radius: 9px;
+  border: 1px solid rgba(223, 227, 233, 0.5);
+  background: rgba(10, 12, 16, 0.55);
   font: 600 10px var(--font-ui);
   color: #dfe3e9;
 }
@@ -873,19 +889,22 @@ html, body {
   font-size: 13.5px;
   font-weight: 500;
 }
-.outline-pill {
+/* 11a: the ⋯ overflow circle that replaced the old "Chapters" outline pill. */
+.vsheet__more {
   appearance: none;
   flex: 0 0 auto;
+  width: 44px;
   height: 44px;
-  padding: 0 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border-radius: 22px;
   border: 1px solid var(--dashed);
   background: transparent;
-  color: #a8b0bc;
-  font: 500 13.5px var(--font-ui);
+  color: var(--text-muted);
   cursor: pointer;
 }
-.outline-pill:hover { border-color: #4a5262; color: var(--text-secondary); }
+.vsheet__more:hover { border-color: #4a5262; color: var(--text-secondary); }
 
 .vsheet__facts { padding: 0 24px; }
 .vsheet__fact { display: flex; justify-content: space-between; gap: 16px; padding: 10px 0; border-top: 1px solid var(--border); font: 400 12.5px var(--font-ui); }
@@ -1294,11 +1313,77 @@ html, body {
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
 }
 
-/* A tappable metadata row on the info page (the "Chapters" entry point). */
-.info-trow--link { cursor: pointer; -webkit-tap-highlight-color: transparent; }
-.info-trow--link:hover { background: rgba(255, 255, 255, 0.02); }
-.info-trow__v--nav { display: inline-flex; align-items: center; gap: 4px; }
-.info-trow__chev { color: var(--text-dimmest); display: inline-flex; }
+/* Chapter preview (11b / 11a) — the five-row list that ends every info page and
+   volume sheet. Its "See all N chapters" row is the primary route into the full
+   Chapters screen. Shares the reading-screen's row treatment. */
+.cprev { margin-top: 24px; }
+.cprev__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  padding: 0 24px 11px;
+}
+.cprev__count { font: 400 11.5px var(--font-ui); color: #5b636f; }
+.cprev__row {
+  appearance: none;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-top: 1px solid var(--border-hair);
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 11px 24px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.cprev__num {
+  flex: 0 0 auto;
+  width: 31px;
+  text-align: right;
+  font: 400 12.5px var(--font-mono);
+  color: var(--text-dimmest);
+}
+.cprev__title {
+  flex: 1;
+  min-width: 0;
+  font: 400 14px var(--font-ui);
+  color: var(--text-body);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cprev__titlewrap { flex: 1; min-width: 0; }
+.cprev__titlewrap .cprev__title { white-space: normal; }
+.cprev__sub { margin-top: 2px; font: 400 11.5px var(--font-ui); color: var(--fill-card); }
+.cprev__check { flex: 0 0 auto; color: #4f5763; display: inline-flex; }
+.cprev__row--read .cprev__num,
+.cprev__row--read .cprev__title { color: var(--text-dim); }
+.cprev__row--current {
+  background: var(--surface);
+  border-left: 2px solid var(--fill-cover);
+  padding-left: 22px;
+}
+.cprev__row--current .cprev__num { color: var(--text-body); font-weight: 600; }
+.cprev__row--current .cprev__title { color: #eef1f5; font-weight: 600; }
+.cprev__seeall {
+  appearance: none;
+  width: 100%;
+  background: transparent;
+  border: 0;
+  border-top: 1px solid var(--border-hair);
+  border-bottom: 1px solid var(--border-hair);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 24px;
+  font: 500 13px var(--font-ui);
+  color: #a8b0bc;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.cprev__chev { color: #5b636f; display: inline-flex; }
 
 /* "See all chapters" — pinned footer of the reader drawer's short list. */
 .drawer-seeall {

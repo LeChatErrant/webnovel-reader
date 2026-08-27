@@ -196,11 +196,14 @@ function bookPercent(book) {
 function bookIsStarted(book) {
   return !!progressMap[book.id];
 }
-function bookMetaText(book) {
-  const pct = bookPercent(book);
-  if (pct >= 100) return "Finished";
-  if (!bookIsStarted(book)) return "Not started";
-  return pct + " %";
+// Roman numeral for the title-collision cue (11c). Volume indexes are small, so
+// the full 1–3999 converter is overkill but harmless.
+function toRoman(n) {
+  if (!n || n < 1) return "";
+  const map = [[1000, "M"], [900, "CM"], [500, "D"], [400, "CD"], [100, "C"], [90, "XC"], [50, "L"], [40, "XL"], [10, "X"], [9, "IX"], [5, "V"], [4, "IV"], [1, "I"]];
+  let out = "", r = n;
+  for (const [v, sym] of map) while (r >= v) { out += sym; r -= v; }
+  return out;
 }
 function seriesVolumes(s) {
   return (s.bookIds || []).map(bookById).filter(Boolean);
@@ -524,8 +527,35 @@ function renderLibrary() {
   );
   section.append(head);
 
+  // Title-collision cue (11c): when two or more shelf entries share a title,
+  // each colliding tile is disambiguated with a numeral and a meta prefix. This
+  // is derived from the current shelf, never stored on the book.
+  const titleCounts = new Map();
+  for (const it of items) {
+    const k = normalize(it.title);
+    titleCounts.set(k, (titleCounts.get(k) || 0) + 1);
+  }
+  const collides = (title) => (titleCounts.get(normalize(title)) || 0) > 1;
+  // Under Recent sort, hold colliding entries adjacent so duplicates read as a
+  // run rather than scattered look-alikes. Title sort already groups them.
+  let ordered = items;
+  if (ui.sort !== "title") {
+    const out = [];
+    const done = new Set();
+    for (const it of items) {
+      const k = normalize(it.title);
+      if (done.has(k)) continue;
+      done.add(k);
+      out.push(it);
+      if ((titleCounts.get(k) || 0) > 1) {
+        for (const other of items) if (other !== it && normalize(other.title) === k) out.push(other);
+      }
+    }
+    ordered = out;
+  }
+
   const grid = h("div", { class: "grid" });
-  for (const it of items) grid.append(it.type === "series" ? seriesTile(it.series) : bookTile(it.book));
+  for (const it of ordered) grid.append(it.type === "series" ? seriesTile(it.series) : bookTile(it.book, collides(it.title)));
   grid.append(importTile());
   section.append(grid);
   body.append(section);
@@ -552,18 +582,37 @@ function continueSection(book) {
   );
 }
 
-function bookTile(book) {
+function bookTile(book, collides = false) {
   const selecting = !!selection;
   const selected = selecting && selection.has(book.id);
   const cover = coverNode(book, "tile__cover");
   cover.append(progressBar(bookPercent(book), "cover"));
+  // Collision cue: an OUTLINED roman-numeral pill, deliberately distinct from
+  // the filled series volume-count badge, so the two are never confused.
+  const numeral = collides && book.volumeIndex ? toRoman(book.volumeIndex) : null;
+  if (numeral) cover.append(h("span", { class: "vol-pill" }, numeral));
   if (selected) cover.append(h("span", { class: "tile__check" }, "✓"));
+  // Meta line (11c): how much is in the thing, never where you are. A colliding
+  // look-alike also gets a disambiguating prefix — its volume number, or the
+  // added date when the number can't be resolved.
+  const chText = `${chapterCount(book).toLocaleString()} chapters`;
+  let meta;
+  if (collides) {
+    const prefix = book.volumeIndex
+      ? `Vol. ${book.volumeIndex} · `
+      : formatAdded(book.addedAt)
+        ? `Added ${formatAdded(book.addedAt)} · `
+        : "";
+    meta = h("div", { class: "tile__meta" }, prefix ? h("span", { class: "tile__meta-vol" }, prefix) : null, chText);
+  } else {
+    meta = h("div", { class: "tile__meta" }, chText);
+  }
   const tile = h(
     "div",
     { class: "tile" + (selecting ? " tile--selectable" : "") + (selected ? " tile--selected" : ""), dataset: { bookId: book.id } },
     cover,
     h("div", { class: "tile__title" }, displayTitle(book)),
-    h("div", { class: "tile__meta" }, bookMetaText(book))
+    meta
   );
   attachTileGestures(tile, book);
   return tile;
@@ -575,13 +624,14 @@ function seriesTile(s) {
   cover.append(h("span", { class: "vol-badge" }, String(s.bookIds.length)));
   cover.append(progressBar(seriesPercent(s), "cover"));
   const stack = h("div", { class: "series-stack" }, h("i", { class: "series-stack__l3" }), h("i", { class: "series-stack__l2" }), cover);
-  const curNum = cur ? volumeNumber(s, cur) : 1;
+  const n = s.bookIds.length;
   const tile = h(
     "div",
     { class: "tile tile--series", onclick: () => !selection && openInfo("series", s.id) },
     stack,
     h("div", { class: "tile__title" }, s.name),
-    h("div", { class: "tile__meta" }, `${s.bookIds.length} volumes · Vol. ${curNum}`)
+    // Meta line (11c): "N volumes" — how much is in the series, never position.
+    h("div", { class: "tile__meta" }, `${n} volume${n === 1 ? "" : "s"}`)
   );
   return tile;
 }
@@ -850,26 +900,13 @@ function renderInfo(kind, id) {
   if (m.publisher) rows.push(["Publisher", m.publisher]);
   const size = formatBytes(m.byteSize);
   rows.push(["On this device", `${m.fileCount} file${m.fileCount === 1 ? "" : "s"}${size ? " · " + size : ""}`]);
+  // Plain display rows; the route into the Chapters screen is the five-chapter
+  // preview at the foot of the page (11b), not this table row.
   const table = h("div", { class: "info-table" });
-  // The Chapters row is one of the three entry points to the Chapters screen —
-  // it is tappable and carries a chevron; the rest are plain display rows.
-  const chapterVolId = m.kind === "series" && m.currentVolume ? m.currentVolume.id : null;
-  const openChaptersFromInfo = () => openChapters(m.kind, m.id, { volId: chapterVolId });
   for (const [label, value] of rows) {
-    if (label === "Chapters") {
-      table.append(
-        h(
-          "div",
-          { class: "info-trow info-trow--link", role: "button", tabindex: "0", onclick: openChaptersFromInfo, onkeydown: (e) => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), openChaptersFromInfo()) },
-          h("span", { class: "info-trow__k" }, label),
-          h("span", { class: "info-trow__v info-trow__v--nav" }, value, h("span", { class: "info-trow__chev" }, svg(ICON.chevron)))
-        )
-      );
-    } else {
-      table.append(
-        h("div", { class: "info-trow" }, h("span", { class: "info-trow__k" }, label), h("span", { class: "info-trow__v" }, value))
-      );
-    }
+    table.append(
+      h("div", { class: "info-trow" }, h("span", { class: "info-trow__k" }, label), h("span", { class: "info-trow__v" }, value))
+    );
   }
   content.append(table);
 
@@ -893,6 +930,16 @@ function renderInfo(kind, id) {
       )
     );
   }
+
+  // Every info page ends in a five-chapter preview (11b). For a series it is the
+  // reading volume's chapters (absolutely numbered), and See-all opens that
+  // volume; for a standalone it is the book's own chapters.
+  const pv = previewItemsFor(m);
+  const preview = chapterPreview(pv.items, {
+    scoped: m.kind === "series",
+    onSeeAll: () => openChapters(m.kind, m.id, { volId: pv.volId }),
+  });
+  if (preview) content.append(preview);
 
   root.append(content);
   root.scrollTop = 0;
@@ -1227,11 +1274,17 @@ function showVolumeSheet(s, book, start, end) {
   else statusLine = "Not started";
   const continueLabel = pct >= 100 ? "Read again" : p ? `Continue ch. ${absCh}` : "Start reading";
 
+  // File facts (11a): File · Size · Added — three plain rows.
   const facts = [
-    ["This volume", `${chapterCount(book)} chapters${formatBytes(book.fileBlob?.size) ? " · " + formatBytes(book.fileBlob.size) : ""}`],
     book.fileName && ["File", book.fileName],
+    formatBytes(book.fileBlob?.size) && ["Size", formatBytes(book.fileBlob.size)],
     formatAdded(book.addedAt) && ["Added", formatAdded(book.addedAt)],
   ].filter(Boolean);
+
+  // Volume overflow menu (⋯) and the Edit-details editor both act on this
+  // volume as if it were a standalone book.
+  const editVolume = () => { hideVolumeSheet(); showEditDetails(infoModel("book", book.id)); };
+  const removeVolume = () => { hideVolumeSheet(); confirmDeleteVolume(book); };
 
   const card = el.volumeCard;
   card.innerHTML = "";
@@ -1255,7 +1308,18 @@ function showVolumeSheet(s, book, start, end) {
       "div",
       { class: "vsheet__actions" },
       h("button", { class: "pill-btn vsheet__continue", onclick: () => { hideVolumeSheet(); openBook(book.id); } }, continueLabel),
-      h("button", { class: "outline-pill", onclick: () => { hideVolumeSheet(); openChapters("series", s.id, { volId: book.id }); } }, "Chapters")
+      h(
+        "button",
+        {
+          class: "vsheet__more",
+          "aria-label": "More",
+          onclick: () => showActionSheet([
+            { label: "Edit details", onClick: editVolume },
+            { label: "Remove from series", danger: true, onClick: removeVolume },
+          ]),
+        },
+        svg(ICON.more)
+      )
     ),
     h(
       "div",
@@ -1265,9 +1329,21 @@ function showVolumeSheet(s, book, start, end) {
     h(
       "div",
       { class: "vsheet__textactions" },
-      h("button", { class: "text-btn text-btn--danger", onclick: () => { hideVolumeSheet(); confirmDeleteVolume(book); } }, "Remove from series")
+      h("button", { class: "text-btn", onclick: editVolume }, "Edit details"),
+      h("button", { class: "text-btn text-btn--danger", onclick: removeVolume }, "Remove from series")
     )
   );
+
+  // Chapters preview last (11a) — facts and destructive actions must not sit
+  // after a list the reader is scanning. Absolute numbers, this-volume count.
+  const model = chaptersModel("series", s.id);
+  const items = model ? model.items.filter((it) => it.bookId === book.id) : [];
+  const preview = chapterPreview(items, {
+    scoped: true,
+    onSeeAll: () => { hideVolumeSheet(); openChapters("series", s.id, { volId: book.id }); },
+  });
+  if (preview) card.append(preview);
+
   el.volumeSheet.hidden = false;
 }
 
@@ -1350,6 +1426,100 @@ function chaptersModel(kind, id) {
 // sheet or a series' current volume); null shows the whole story.
 function openChapters(kind, id, { volId = null } = {}) {
   go({ route: "chapters", kind, id, volId });
+}
+
+// -------------------------------------------------------------------------
+// Chapter preview (designs 11b / 11a) — the five-row list that ends every info
+// page and every volume sheet. It reuses chaptersModel's read/current/unread
+// tagging and absolute numbering; its "See all N chapters" row is the primary
+// route into the full Chapters screen (2e), so the common case (resume, or step
+// one chapter) never has to open it.
+// -------------------------------------------------------------------------
+
+// The five rows to show: an unopened book shows chapters 1–5; a book in progress
+// shows two before the current chapter, the current one, and two after (clamped
+// to the ends). Five or fewer chapters show them all.
+function previewWindow(items) {
+  if (items.length <= 5) return items;
+  const cur = items.findIndex((it) => it.state === "current");
+  if (cur < 0) return items.slice(0, 5);
+  const start = Math.max(0, Math.min(cur - 2, items.length - 5));
+  return items.slice(start, start + 5);
+}
+
+function cprevRow(it) {
+  const open = () => (it.state === "current" ? openBook(it.bookId) : openBook(it.bookId, { startHref: it.href }));
+  if (it.state === "current") {
+    const pct = progressMap[it.bookId]?.chapterPercent;
+    return h(
+      "button",
+      { class: "cprev__row cprev__row--current", onclick: open },
+      h("span", { class: "cprev__num" }, String(it.absNum)),
+      h(
+        "span",
+        { class: "cprev__titlewrap" },
+        h("div", { class: "cprev__title" }, it.label || "Untitled"),
+        h("div", { class: "cprev__sub" }, pct != null ? `Reading · ${pct} % through` : "Reading")
+      )
+    );
+  }
+  return h(
+    "button",
+    { class: "cprev__row cprev__row--" + it.state, onclick: open },
+    h("span", { class: "cprev__num" }, String(it.absNum)),
+    h("span", { class: "cprev__title" }, it.label || "Untitled"),
+    it.state === "read" ? h("span", { class: "cprev__check" }, svg(ICON.check)) : null
+  );
+}
+
+// Build a preview section from a chaptersModel-style item list for one book (or
+// the reading volume of a series). `scoped` switches the right-hand count to
+// "N in this volume"; `onSeeAll` pushes the full Chapters screen.
+function chapterPreview(items, { scoped = false, onSeeAll } = {}) {
+  if (!items || !items.length) return null;
+  const total = items.length;
+  const cur = items.find((it) => it.state === "current");
+  const headLabel = cur ? `Chapters · reading ch. ${cur.absNum}` : "Chapters";
+  const countText = scoped
+    ? `${total.toLocaleString()} in this volume`
+    : `${total.toLocaleString()} chapter${total === 1 ? "" : "s"}`;
+  const sec = h(
+    "section",
+    { class: "cprev" },
+    h(
+      "div",
+      { class: "cprev__head" },
+      h("span", { class: "lib-label" }, headLabel),
+      h("span", { class: "cprev__count" }, countText)
+    )
+  );
+  const rows = h("div", { class: "cprev__rows" });
+  for (const it of previewWindow(items)) rows.append(cprevRow(it));
+  sec.append(rows);
+  if (total > 5) {
+    sec.append(
+      h(
+        "button",
+        { class: "cprev__seeall", onclick: onSeeAll },
+        h("span", null, `See all ${total.toLocaleString()} chapters`),
+        h("span", { class: "cprev__chev" }, svg(ICON.chevron))
+      )
+    );
+  }
+  return sec;
+}
+
+// The chapter items an info context previews: a standalone book's own chapters,
+// or the reading volume's chapters (absolutely numbered) for a series.
+function previewItemsFor(m) {
+  if (m.kind === "series") {
+    const vol = m.currentVolume;
+    if (!vol) return { items: [], volId: null };
+    const model = chaptersModel("series", m.id);
+    return { items: model ? model.items.filter((it) => it.bookId === vol.id) : [], volId: vol.id };
+  }
+  const model = chaptersModel("book", m.id);
+  return { items: model ? model.items : [], volId: null };
 }
 
 // "Shadow Slave · vol. 2" — the book, then the active volume filter.
@@ -1862,6 +2032,56 @@ let currentBook = null; // the library book being read
 let flatToc = [];
 let currentHref = null;
 
+// Persist an epub.js location as the current reading position. Called on every
+// `relocated` while scrolling, and once more when the app is backgrounded so
+// the freshest position survives. Pure persistence — no DOM/view updates, so it
+// is safe to run while the reader is hidden.
+function saveReadingLocation(location) {
+  const lib = currentBook;
+  if (!lib || !location?.start) return;
+  const idx = typeof location.start.index === "number" ? location.start.index : 0;
+  const total = book?.spine?.spineItems?.length || chapterCount(lib);
+  const prev = progressMap[lib.id];
+  // Furthest-reached: the recorded high-water mark only ever rises, and once
+  // a book is finished it stays finished even if you reopen an early chapter.
+  const maxChapterIndex = Math.max(prev?.maxChapterIndex ?? -1, idx);
+  const finished = prev?.finished || (total > 0 && maxChapterIndex >= total - 1);
+  // Best-effort progress *within* the current chapter, for the Chapters
+  // screen's "Reading · N % through" line. Not all layouts expose it.
+  const disp = location.start.displayed;
+  const chapterPercent =
+    disp && disp.total ? Math.min(100, Math.max(0, Math.round((disp.page / disp.total) * 100))) : prev?.chapterPercent;
+  putProgress({
+    bookId: lib.id,
+    cfi: location.start.cfi || null,
+    chapterIndex: idx,
+    maxChapterIndex,
+    chapterLabel: chapterLabelFor(location.start.href || currentHref) || prev?.chapterLabel || "",
+    chapterPercent,
+    finished,
+    updatedAt: Date.now(),
+  });
+  ui.lastReadBookId = lib.id;
+  saveUi();
+}
+
+// Flush the reading position when the app is backgrounded (phone lock or
+// app-switch). The scroll-driven `relocated` save is throttled, so without this
+// a spot reached moments before locking could be lost. `currentLocation()`
+// recomputes from the live DOM, giving a fresher position than the last event.
+// Pure save — it never moves the view.
+function flushReadingPosition() {
+  if (!rendition || document.getElementById("app").dataset.route !== "reader") return;
+  try {
+    let loc = rendition.currentLocation();
+    if (loc && typeof loc.then === "function") loc = null; // async manager; skip
+    if (!loc?.start) loc = rendition.location; // fall back to last known
+    if (loc?.start) saveReadingLocation(loc);
+  } catch (err) {
+    console.warn("Position flush failed:", err);
+  }
+}
+
 async function openBook(id, { withDrawer = false, startHref = null } = {}) {
   const lib = bookById(id);
   if (!lib) return;
@@ -1926,32 +2146,10 @@ async function renderReader(lib, startHref = null) {
 
   rendition.on("relocated", (location) => {
     currentHref = location?.start?.href || null;
-    const idx = typeof location?.start?.index === "number" ? location.start.index : 0;
-    highlightToc(currentHref);
+    // Re-window the drawer list around the new current chapter (also re-highlights).
+    renderToc();
     updateChapterTitle(currentHref);
-    const total = book?.spine?.spineItems?.length || chapterCount(lib);
-    const prev = progressMap[lib.id];
-    // Furthest-reached: the recorded high-water mark only ever rises, and once
-    // a book is finished it stays finished even if you reopen an early chapter.
-    const maxChapterIndex = Math.max(prev?.maxChapterIndex ?? -1, idx);
-    const finished = prev?.finished || (total > 0 && maxChapterIndex >= total - 1);
-    // Best-effort progress *within* the current chapter, for the Chapters
-    // screen's "Reading · N % through" line. Not all layouts expose it.
-    const disp = location?.start?.displayed;
-    const chapterPercent =
-      disp && disp.total ? Math.min(100, Math.max(0, Math.round((disp.page / disp.total) * 100))) : prev?.chapterPercent;
-    putProgress({
-      bookId: lib.id,
-      cfi: location?.start?.cfi || null,
-      chapterIndex: idx,
-      maxChapterIndex,
-      chapterLabel: chapterLabelFor(currentHref) || prev?.chapterLabel || "",
-      chapterPercent,
-      finished,
-      updatedAt: Date.now(),
-    });
-    ui.lastReadBookId = lib.id;
-    saveUi();
+    saveReadingLocation(location);
     updateDrawerBook();
   });
 
@@ -2017,10 +2215,28 @@ function updateDrawerBook() {
   el.drawerVolumes.hidden = true;
 }
 
+// The drawer's chapter list is a quick-jump window around the current chapter,
+// not the whole book — the full list is one tap away via "See all chapters"
+// (section 3). For a book inside a series the rows carry absolute numbers, so
+// "Ch. 351" in vol. 2 stays "Ch. 351".
+const TOC_WINDOW_BEFORE = 4;
+const TOC_WINDOW_AFTER = 10;
 function renderToc() {
   el.tocList.innerHTML = "";
-  for (const entry of flatToc) {
-    const btn = h("button", { dataset: { href: entry.href }, class: entry.depth ? "depth-" + Math.min(entry.depth, 2) : "" }, entry.label || "Untitled");
+  const total = flatToc.length;
+  if (!total) return;
+  const inSeries = !!(currentBook?.seriesId && seriesById(currentBook.seriesId));
+  const offset = inSeries ? volumeChapterOffset(currentBook) : 0;
+  const curBase = baseHref(currentHref);
+  let curIdx = curBase ? flatToc.findIndex((e) => baseHref(e.href) === curBase) : -1;
+  if (curIdx < 0) curIdx = 0;
+  const start = Math.max(0, curIdx - TOC_WINDOW_BEFORE);
+  const end = Math.min(total, curIdx + TOC_WINDOW_AFTER + 1);
+  for (let i = start; i < end; i++) {
+    const entry = flatToc[i];
+    const text = entry.label || "Untitled";
+    const label = inSeries ? `${offset + i + 1} · ${text}` : text;
+    const btn = h("button", { dataset: { href: entry.href }, class: entry.depth ? "depth-" + Math.min(entry.depth, 2) : "" }, label);
     btn.addEventListener("click", () => {
       rendition.display(entry.href);
       closeDrawer();
@@ -2435,6 +2651,13 @@ function wireEvents() {
   app.addEventListener("drop", (e) => {
     if (e.dataTransfer?.files?.length) importFiles(e.dataTransfer.files);
   });
+
+  // Save the reading position the moment the app is backgrounded — phone lock,
+  // app-switch, or tab close. Covers the gap left by the throttled scroll save.
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) flushReadingPosition();
+  });
+  window.addEventListener("pagehide", flushReadingPosition);
 }
 
 // One-time migration from the single-book app: fold the previously-open book
