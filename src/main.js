@@ -2330,6 +2330,21 @@ function chapterLabelFor(href) {
   for (const e of flatToc) if (baseHref(e.href) === current) return e.label || "";
   return null;
 }
+// The reader's index in the readable TOC, from the live reading position.
+function currentTocIndex() {
+  const cur = baseHref(currentHref);
+  return cur ? flatToc.findIndex((e) => baseHref(e.href) === cur) : -1;
+}
+// Move one chapter back/forward and open it at its top. In scrolled-doc flow
+// rendition.prev() lands at the *end* of the previous section, so stepping by
+// TOC href instead keeps "previous" and "next" symmetric — both start you at
+// the beginning of the target chapter.
+function goChapter(delta) {
+  if (!rendition || !flatToc.length) return;
+  const i = currentTocIndex();
+  const target = flatToc[(i < 0 ? 0 : i) + delta];
+  if (target) rendition.display(target.href);
+}
 function updateChapterTitle(href) {
   const label = href ? chapterLabelFor(href) : "";
   if (label === null) return;
@@ -2397,12 +2412,12 @@ function injectChapterNav(contents) {
     prev.className = "cn-btn cn-prev";
     prev.textContent = "← Previous";
     prev.disabled = atStart;
-    prev.addEventListener("click", () => rendition && rendition.prev());
+    prev.addEventListener("click", () => goChapter(-1));
     const nx = doc.createElement("button");
     nx.className = "cn-btn cn-next";
     nx.textContent = "Next chapter →";
     nx.disabled = atEnd;
-    nx.addEventListener("click", () => rendition && rendition.next());
+    nx.addEventListener("click", () => goChapter(1));
     nav.appendChild(prev);
     nav.appendChild(nx);
     wrap.appendChild(nav);
@@ -2783,8 +2798,8 @@ function wireEvents() {
     closeDrawer();
     go({ route: "library" });
   });
-  el.btnPrev.addEventListener("click", () => rendition && rendition.prev());
-  el.btnNext.addEventListener("click", () => rendition && rendition.next());
+  el.btnPrev.addEventListener("click", () => goChapter(-1));
+  el.btnNext.addEventListener("click", () => goChapter(1));
 
   el.selectCancel.addEventListener("click", exitSelection);
   el.selectGroup.addEventListener("click", confirmGrouping);
@@ -2813,8 +2828,8 @@ function wireEvents() {
       if (el.drawer.classList.contains("open")) return closeDrawer();
     }
     if (!rendition) return;
-    if (e.key === "ArrowRight") rendition.next();
-    else if (e.key === "ArrowLeft") rendition.prev();
+    if (e.key === "ArrowRight") goChapter(1);
+    else if (e.key === "ArrowLeft") goChapter(-1);
   });
 
   // Drag & drop an .epub anywhere (desktop convenience).
