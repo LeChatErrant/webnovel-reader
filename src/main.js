@@ -2238,24 +2238,19 @@ function updateDrawerBook() {
   el.drawerVolumes.hidden = true;
 }
 
-// The drawer's chapter list is a quick-jump window around the current chapter,
-// not the whole book — the full list is one tap away via "See all chapters"
-// (section 3). For a book inside a series the rows carry absolute numbers, so
-// "Ch. 351" in vol. 2 stays "Ch. 351".
-const TOC_WINDOW_BEFORE = 4;
-const TOC_WINDOW_AFTER = 10;
+// The drawer lists every chapter of the current book (the current volume, for
+// a book inside a series). The list scrolls within the drawer and is scrolled
+// to the current chapter on open via highlightToc. "See all chapters" (section
+// 3) still leads to the whole-series screen for a book inside a series. For a
+// book inside a series the rows carry absolute numbers, so "Ch. 351" in vol. 2
+// stays "Ch. 351".
 function renderToc() {
   el.tocList.innerHTML = "";
   const total = flatToc.length;
   if (!total) return;
   const inSeries = !!(currentBook?.seriesId && seriesById(currentBook.seriesId));
   const offset = inSeries ? volumeChapterOffset(currentBook) : 0;
-  const curBase = baseHref(currentHref);
-  let curIdx = curBase ? flatToc.findIndex((e) => baseHref(e.href) === curBase) : -1;
-  if (curIdx < 0) curIdx = 0;
-  const start = Math.max(0, curIdx - TOC_WINDOW_BEFORE);
-  const end = Math.min(total, curIdx + TOC_WINDOW_AFTER + 1);
-  for (let i = start; i < end; i++) {
+  for (let i = 0; i < total; i++) {
     const entry = flatToc[i];
     const text = entry.label || "Untitled";
     const label = inSeries ? `${offset + i + 1} · ${text}` : text;
