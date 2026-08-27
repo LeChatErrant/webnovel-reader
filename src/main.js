@@ -2169,7 +2169,7 @@ async function renderReader(lib, startHref = null) {
 
   rendition.on("relocated", (location) => {
     currentHref = location?.start?.href || null;
-    // Re-window the drawer list around the new current chapter (also re-highlights).
+    // Re-render the drawer list so read-state and the highlight track the move.
     renderToc();
     updateChapterTitle(currentHref);
     saveReadingLocation(location);
@@ -2238,12 +2238,13 @@ function updateDrawerBook() {
   el.drawerVolumes.hidden = true;
 }
 
-// The drawer's chapter list is a quick-jump window around the current chapter,
-// not the whole book — the full list is one tap away via "See all chapters"
-// (section 3). For a book inside a series the rows carry absolute numbers, so
-// "Ch. 351" in vol. 2 stays "Ch. 351".
-const TOC_WINDOW_BEFORE = 4;
-const TOC_WINDOW_AFTER = 10;
+// The drawer lists every chapter of the current book (the current volume, for
+// a book inside a series). The list scrolls within the drawer and is scrolled
+// to the current chapter on open via highlightToc. Chapters before the one
+// you're on are marked read — dimmed with a check — to match the full Chapters
+// screen and its previews; the current chapter keeps its highlight (via
+// highlightToc), and the rest read as unread. For a book inside a series the
+// rows carry absolute numbers, so "Ch. 351" in vol. 2 stays "Ch. 351".
 function renderToc() {
   el.tocList.innerHTML = "";
   const total = flatToc.length;
@@ -2251,15 +2252,19 @@ function renderToc() {
   const inSeries = !!(currentBook?.seriesId && seriesById(currentBook.seriesId));
   const offset = inSeries ? volumeChapterOffset(currentBook) : 0;
   const curBase = baseHref(currentHref);
-  let curIdx = curBase ? flatToc.findIndex((e) => baseHref(e.href) === curBase) : -1;
-  if (curIdx < 0) curIdx = 0;
-  const start = Math.max(0, curIdx - TOC_WINDOW_BEFORE);
-  const end = Math.min(total, curIdx + TOC_WINDOW_AFTER + 1);
-  for (let i = start; i < end; i++) {
+  const curIdx = curBase ? flatToc.findIndex((e) => baseHref(e.href) === curBase) : -1;
+  for (let i = 0; i < total; i++) {
     const entry = flatToc[i];
     const text = entry.label || "Untitled";
     const label = inSeries ? `${offset + i + 1} · ${text}` : text;
-    const btn = h("button", { dataset: { href: entry.href }, class: entry.depth ? "depth-" + Math.min(entry.depth, 2) : "" }, label);
+    const read = curIdx >= 0 && i < curIdx;
+    const cls = "toc-item" + (entry.depth ? " depth-" + Math.min(entry.depth, 2) : "") + (read ? " toc-item--read" : "");
+    const btn = h(
+      "button",
+      { dataset: { href: entry.href }, class: cls },
+      h("span", { class: "toc-item__label" }, label),
+      read ? h("span", { class: "toc-item__check" }, svg(ICON.check)) : null
+    );
     btn.addEventListener("click", () => {
       rendition.display(entry.href);
       closeDrawer();
@@ -2666,7 +2671,6 @@ function collectRefs() {
     drawerBookTitle: "drawer-book-title",
     drawerBookSub: "drawer-book-sub",
     drawerVolumes: "drawer-volumes",
-    drawerSeeall: "drawer-seeall",
     scrim: "scrim",
     tocList: "toc-list",
     viewer: "viewer",
@@ -2737,14 +2741,6 @@ function wireEvents() {
   el.drawerHome.addEventListener("click", () => {
     closeDrawer();
     go({ route: "library" });
-  });
-  // "See all chapters" — pushes the full Chapters screen (8a), closing the
-  // drawer. A book in a series opens the whole story with its volume preset.
-  el.drawerSeeall.addEventListener("click", () => {
-    if (!currentBook) return;
-    closeDrawer();
-    if (currentBook.seriesId && seriesById(currentBook.seriesId)) openChapters("series", currentBook.seriesId, { volId: currentBook.id });
-    else openChapters("book", currentBook.id);
   });
   el.btnPrev.addEventListener("click", () => rendition && rendition.prev());
   el.btnNext.addEventListener("click", () => rendition && rendition.next());
