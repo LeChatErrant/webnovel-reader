@@ -2641,6 +2641,7 @@ function go(state, push = true) {
     setRouteChrome("library");
     renderLibrary();
   }
+  activeState = state;
   if (push && cur !== undefined) history.pushState(state, "");
   else history.replaceState(state, "");
 }
@@ -2652,7 +2653,40 @@ function openInfo(kind, id) {
 function openSeries(id) {
   openInfo("series", id);
 }
-window.addEventListener("popstate", (e) => applyState(e.state));
+
+// The screen the phone's Back gesture should land on — the *structural* parent,
+// not wherever you happened to come from. reader → the book's info page (its
+// series page for a volume), chapters → the same info page, info → the library.
+// This makes Back predictable no matter the path in (a book opened straight into
+// the reader from the Continue card still backs out to its info page).
+let activeState = { route: "library" };
+function bookInfoParent(bookId) {
+  const b = bookById(bookId);
+  if (b?.seriesId && seriesById(b.seriesId)) return { route: "info", kind: "series", id: b.seriesId };
+  return { route: "info", kind: "book", id: bookId };
+}
+function structuralParent(state) {
+  if (!state) return null;
+  if (state.route === "reader" && state.id) return bookInfoParent(state.id);
+  if (state.route === "chapters" && state.id)
+    return state.kind === "series" ? { route: "info", kind: "series", id: state.id } : bookInfoParent(state.id);
+  if (state.route === "info") return { route: "library" };
+  return null; // library / unknown — the root; let Back leave the app
+}
+window.addEventListener("popstate", (e) => {
+  const parent = structuralParent(activeState);
+  if (parent) {
+    // Redirect Back to the structural parent and keep the app in control of the
+    // entry the browser just popped to.
+    applyState(parent);
+    activeState = parent;
+    history.replaceState(parent, "");
+  } else {
+    // At the root screen: follow the browser's own Back (out of the app).
+    applyState(e.state);
+    activeState = e.state && e.state.route ? e.state : { route: "library" };
+  }
+});
 
 // =========================================================================
 // Install (Add to Home Screen). The only entry point is the persistent
