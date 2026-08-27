@@ -2772,12 +2772,16 @@ const updateSW = registerSW({
         if (sw.state === "installed") showUpdateBanner({ installing: false });
       });
     });
-    // Poll for a fresh build on focus and hourly — a long-lived installed
-    // session (especially on iOS) would otherwise never notice a deploy.
+    // Poll for a fresh build: immediately whenever the app is refocused, and
+    // every minute while it's actually on screen. `reg.update()` is a cheap
+    // conditional GET of sw.js (usually a 304), and the `document.hidden`
+    // guard means a backgrounded tab makes no requests at all — so a reader
+    // left open notices a deploy within ~a minute without wasting battery.
+    const UPDATE_POLL_MS = 60 * 1000;
     const check = () => { if (!document.hidden) reg.update().catch(() => {}); };
     window.addEventListener("focus", check);
     document.addEventListener("visibilitychange", check);
-    setInterval(check, 60 * 60 * 1000);
+    setInterval(check, UPDATE_POLL_MS);
   },
 });
 const applyUpdate = () => updateSW(true);
