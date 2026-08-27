@@ -2303,6 +2303,11 @@ function renderToc() {
   highlightToc(currentHref);
 }
 const baseHref = (href) => (href || "").split("#")[0];
+// How many chapters of already-read context to keep above the current one when
+// the drawer settles, so the current chapter always lands near the top with a
+// short lead-in — the same framing whether you resumed at your furthest point
+// or jumped back into an earlier chapter.
+const TOC_LEAD = 2;
 function highlightToc(href) {
   const current = baseHref(href);
   let match = null;
@@ -2311,7 +2316,14 @@ function highlightToc(href) {
     btn.classList.toggle("current", is);
     if (is) match = btn;
   });
-  if (match) match.scrollIntoView({ block: "nearest" });
+  if (!match) return;
+  // Top-align the row TOC_LEAD chapters before the current one. Using the
+  // rect delta (rather than offsetTop) keeps this correct even while the drawer
+  // is still translated off-screen, and regardless of the offset parent.
+  const rows = [...el.tocList.children];
+  const li = match.closest("li");
+  const anchor = rows[Math.max(0, rows.indexOf(li) - TOC_LEAD)] || li;
+  el.tocList.scrollTop += anchor.getBoundingClientRect().top - el.tocList.getBoundingClientRect().top;
 }
 function chapterLabelFor(href) {
   const current = baseHref(href);
