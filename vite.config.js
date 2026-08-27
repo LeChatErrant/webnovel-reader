@@ -1,13 +1,25 @@
+import { execSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { defineConfig } from "vite";
 import { VitePWA } from "vite-plugin-pwa";
 
-// A human-readable build identity, baked in at build time and exposed to the
-// app as __APP_VERSION__. There is no browser API that tells you "which
-// version am I" — you stamp it yourself. The timestamp changes every build,
-// which also guarantees sw.js changes byte-for-byte so the browser notices.
+// A build identity, baked in at build time and exposed to the app as
+// __APP_VERSION__ (shown in the Library footer). There is no browser API that
+// tells you "which version am I" — you stamp it yourself. package.json version
+// + the commit SHA makes a deployed build traceable back to an exact point in
+// history; since every deploy bumps the version (new commit → new SHA), the
+// string also changes each release, so sw.js changes and the browser updates.
 const pkg = JSON.parse(readFileSync(new URL("./package.json", import.meta.url)));
-const APP_VERSION = `${pkg.version} · ${new Date().toISOString().slice(0, 16).replace("T", " ")} UTC`;
+const shortSha = (() => {
+  // In CI the deployed commit is in GITHUB_SHA; locally, ask git.
+  if (process.env.GITHUB_SHA) return process.env.GITHUB_SHA.slice(0, 7);
+  try {
+    return execSync("git rev-parse --short HEAD", { encoding: "utf8" }).trim();
+  } catch {
+    return "local";
+  }
+})();
+const APP_VERSION = `${pkg.version} · ${shortSha}`;
 
 // base "./" keeps asset URLs relative so the built app works from any path
 // (local file host, GitHub Pages subpath, etc.). host: true exposes the dev
