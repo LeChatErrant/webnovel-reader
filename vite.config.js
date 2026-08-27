@@ -10,15 +10,18 @@ export default defineConfig({
   plugins: [
     VitePWA({
       // Ship a service worker that precaches the whole app shell (JS, CSS,
-      // HTML, the Merriweather fonts, icon and sample book), so once the app
-      // has loaded on the phone it opens and reads with no network at all --
-      // Mac off, WiFi off, on the train. Your own books never touch the
-      // network either way: they are read locally and kept in IndexedDB.
+      // HTML, the Merriweather fonts and icon), so once the app has loaded on
+      // the phone it opens and reads with no network at all -- Mac off, WiFi
+      // off, on the train. Your own books never touch the network either way:
+      // they are read locally and kept in IndexedDB.
       registerType: "autoUpdate",
-      includeAssets: ["icon.svg", "fonts/*.ttf", "sample.epub"],
+      includeAssets: ["icon.svg", "fonts/*.ttf"],
       workbox: {
-        // Precache every built asset plus fonts and the sample book.
-        globPatterns: ["**/*.{js,css,html,svg,ttf,woff2,epub}"],
+        // Precache every built asset plus the fonts.
+        globPatterns: ["**/*.{js,css,html,svg,ttf,woff2}"],
+        // The dev-seed books (public/seed/*.epub) are a large, dev-only fixture
+        // fetched on demand by a hidden long-press — never precache them.
+        globIgnores: ["**/seed/**"],
         // Serve index.html for any navigation request while offline (SPA).
         navigateFallback: "index.html",
         // Fonts/epub can exceed the default 2 MiB precache cap.

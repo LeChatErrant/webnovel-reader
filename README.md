@@ -72,5 +72,15 @@ it opens offline forever.
 - `src/style.css` — app chrome (top bar, drawer, landing)
 - `public/reader-theme.css` — the Webnovel-dark theme injected into each chapter
 - `public/fonts/` — Merriweather (OFL) static faces
-- `scripts/make-sample.mjs` — regenerates the bundled sample book
+- `scripts/fetch-seed.mjs` — downloads the dev-seed books into `public/seed/`
 - `vite.config.js` — Vite + PWA (service worker, manifest) config
+
+## Dev seeding
+
+For design/QA there is a hidden reset that fills the library with a fixed set
+of real, public-domain books (from Project Gutenberg) covering every case the
+design needs — with/without cover, started/unstarted, loose volumes, and
+shelves. **Long-press the Import tile** (or the empty-state Import button) and
+confirm. It is a *reset*: it wipes the current library first, so it never
+duplicates. The books live in `public/seed/` (committed, excluded from the PWA
+precache); regenerate them with `npm run seed:fetch`.

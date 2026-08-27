@@ -49,6 +49,7 @@ function tx(store, mode, fn) {
 const dbGetAll = (store) => tx(store, "readonly", (os) => os.getAll());
 const dbPut = (store, value) => tx(store, "readwrite", (os) => os.put(value));
 const dbDelete = (store, key) => tx(store, "readwrite", (os) => os.delete(key));
+const dbClear = (store) => tx(store, "readwrite", (os) => os.clear());
 const kvGet = (key) => tx("kv", "readonly", (os) => os.get(key));
 const kvSet = (key, value) => tx("kv", "readwrite", (os) => os.put(value, key));
 const kvDelete = (key) => tx("kv", "readwrite", (os) => os.delete(key));
@@ -151,7 +152,12 @@ function progressBar(pct, variant) {
 // reader flow, the chapter menu and the chapter counts/numbers.
 const FRONT_MATTER_RE =
   /^(informations?|table of contents|contents|toc|cover|title\s*page|copyright|colophon)$/i;
-const isFrontMatter = (label) => FRONT_MATTER_RE.test((label || "").trim());
+// Public-domain epubs (e.g. Project Gutenberg) tack a licence / boilerplate
+// page onto the spine and TOC; it is never a real chapter, so hide it too.
+const isFrontMatter = (label) => {
+  const t = (label || "").trim();
+  return FRONT_MATTER_RE.test(t) || /project gutenberg/i.test(t) || /\blicen[sc]e$/i.test(t);
+};
 // Never hide everything: if a whole TOC somehow matched, fall back to the
 // original so the reader is never left empty.
 function readableChapters(entries) {
@@ -595,7 +601,8 @@ function bookTile(book, collides = false) {
   // Meta line (11c): how much is in the thing, never where you are. A colliding
   // look-alike also gets a disambiguating prefix — its volume number, or the
   // added date when the number can't be resolved.
-  const chText = `${chapterCount(book).toLocaleString()} chapters`;
+  const n = chapterCount(book);
+  const chText = `${n.toLocaleString()} chapter${n === 1 ? "" : "s"}`;
   let meta;
   if (collides) {
     const prefix = book.volumeIndex
@@ -637,9 +644,9 @@ function seriesTile(s) {
 }
 
 function importTile() {
-  return h(
+  const tile = h(
     "button",
-    { class: "tile tile--import", onclick: pickFiles },
+    { class: "tile tile--import" },
     h(
       "div",
       { class: "import-box" },
@@ -648,9 +655,22 @@ function importTile() {
     ),
     h("div", { class: "tile__meta" }, ".epub from your files")
   );
+  // Tap imports; a long-press is the hidden dev-seed reset.
+  attachSeedGesture(tile, pickFiles);
+  return tile;
+}
+
+// Tap runs `onTap`; a long-press reseeds the demo library. Shared by the Import
+// tile and the empty-state Import button so seeding is reachable even with an
+// empty library.
+function attachSeedGesture(node, onTap) {
+  attachLongPress(node, { canStart: () => !selection, onLongPress: confirmAndSeed, onTap });
 }
 
 function emptyState() {
+  const cta = h("button", { class: "empty__cta" }, "+ Import an .epub");
+  // Tap imports; long-press seeds the demo library (dev-only).
+  attachSeedGesture(cta, pickFiles);
   return h(
     "div",
     { class: "empty" },
@@ -661,8 +681,7 @@ function emptyState() {
       { class: "empty__lead" },
       "Add an .epub from your files and it stays on this device — covers, chapters and your place in it."
     ),
-    h("button", { class: "empty__cta", onclick: pickFiles }, "+ Import an .epub"),
-    h("button", { class: "empty__sample", onclick: loadSample }, "or try a sample")
+    cta
   );
 }
 
@@ -2133,9 +2152,13 @@ async function renderReader(lib, startHref = null) {
 
   // A chapter tapped in the Chapters screen wins; otherwise resume the saved
   // position, falling back to the first real chapter (skipping the epub's own
-  // front matter that our chrome already covers).
-  const saved = progressMap[lib.id]?.cfi;
-  rendition.display(startHref || saved || flatToc[0]?.href || undefined);
+  // front matter that our chrome already covers). When there is no precise CFI
+  // but we do know which chapter the reader was on (e.g. a seeded position, or
+  // progress that outlived its CFI), resume by chapter label.
+  const p = progressMap[lib.id];
+  let resume = p?.cfi;
+  if (!resume && p?.chapterLabel) resume = flatToc.find((e) => e.label === p.chapterLabel)?.href;
+  rendition.display(startHref || resume || flatToc[0]?.href || undefined);
 
   // Refine the chapter list once the live navigation resolves (accurate hrefs).
   book.loaded.navigation.then((nav) => {
@@ -2478,20 +2501,127 @@ window.addEventListener("appinstalled", () => {
 });
 
 // -------------------------------------------------------------------------
-// File picking + sample
+// File picking
 // -------------------------------------------------------------------------
 function pickFiles() {
   el.fileInput.click();
 }
-async function loadSample() {
+
+// -------------------------------------------------------------------------
+// Dev seeding — a hidden reset that fills the library with a fixed set of
+// real, public-domain books covering every design case (with/without cover,
+// started/unstarted, loose volumes, and shelves). Triggered by a long-press on
+// the Import tile (or the empty-state Import button). It is a *reset*: it wipes
+// the current library first, so calling it repeatedly never duplicates.
+//
+// The books live in public/seed/ with a manifest describing how to arrange
+// them; see scripts/fetch-seed.mjs. They are excluded from the PWA precache, so
+// they never ship to real users — only a deliberate long-press fetches them.
+// -------------------------------------------------------------------------
+let seeding = false;
+
+async function confirmAndSeed() {
+  if (seeding) return;
+  const ok = await showConfirmSheet(
+    "Seed demo library",
+    "Replace the library with a fixed set of demo books? This clears everything already here.",
+    "Seed"
+  );
+  if (!ok) return;
+  seeding = true;
   try {
-    const res = await fetch("./sample.epub");
-    const buffer = await res.arrayBuffer();
-    await createBook(buffer, "sample.epub");
-    renderLibrary();
+    await seedDemoLibrary();
   } catch (err) {
-    console.warn("Could not load sample", err);
+    console.warn("Seeding failed", err);
+    alert("Seeding failed: " + (err?.message || err));
+  } finally {
+    seeding = false;
   }
+}
+
+// Wipe every stored book, series and reading position — in memory and on disk.
+async function resetLibrary() {
+  await Promise.all([dbClear("books"), dbClear("series"), dbClear("progress")]);
+  for (const url of coverUrls.values()) URL.revokeObjectURL(url);
+  coverUrls.clear();
+  books = [];
+  series = [];
+  for (const k of Object.keys(progressMap)) delete progressMap[k];
+  ui.lastReadBookId = null;
+  ui.dismissedKeys = [];
+  await saveUi();
+}
+
+async function seedDemoLibrary() {
+  const manifest = await (await fetch("./seed/manifest.json")).json();
+  const entries = manifest.entries || [];
+
+  await resetLibrary();
+
+  // 1. Import every epub (order preserved so the shelf reads intentionally).
+  const rows = []; // { entry, book }
+  for (const entry of entries) {
+    const buffer = await (await fetch("./seed/" + entry.file)).arrayBuffer();
+    const book = await createBook(buffer, entry.file);
+    if (entry.noCover) {
+      book.coverBlob = null;
+      await dbPut("books", book);
+    }
+    rows.push({ entry, book });
+  }
+
+  const now = Date.now();
+  const HOUR = 3600 * 1000;
+
+  // 2. Group volumes into shelves, in manifest order, by series name.
+  const bySeries = new Map();
+  for (const { entry, book } of rows) {
+    if (!entry.series) continue;
+    if (!bySeries.has(entry.series)) bySeries.set(entry.series, []);
+    bySeries.get(entry.series).push({ entry, book });
+  }
+  for (const [name, members] of bySeries) {
+    const s = { id: uid(), name, author: members[0].book.author || "", bookIds: [] };
+    members.forEach(({ entry, book }, i) => {
+      book.seriesId = s.id;
+      book.volumeIndex = entry.vol || i + 1;
+      s.bookIds.push(book.id);
+    });
+    await Promise.all(members.map(({ book }) => dbPut("books", book)));
+    series.push(s);
+    await dbPut("series", s);
+  }
+
+  // 3. Stagger "added" dates so the shelf isn't one indistinct block, then set
+  // reading progress on the books the manifest marks as started.
+  for (let i = 0; i < rows.length; i++) {
+    rows[i].book.addedAt = now - (i + 1) * 6 * HOUR;
+    await dbPut("books", rows[i].book);
+  }
+  for (const { entry, book } of rows) {
+    if (!entry.started) continue;
+    // The percentage bar is measured against the spine, so the stored index is
+    // spine-based; the resume *label* is picked from the readable chapter list
+    // at the same fraction, so it lands on a real chapter (not a title page).
+    const total = book.spineCount || chapterCount(book);
+    const idx = Math.max(0, Math.min(total - 1, Math.round(entry.started * total) - 1));
+    const readable = readableChapters(book.chapters || []);
+    const rIdx = Math.max(0, Math.min(readable.length - 1, Math.round(entry.started * readable.length) - 1));
+    const label = readable[rIdx]?.label || "";
+    // recency 0 = freshest (drives the "Continue" card); default well back.
+    const updatedAt = now - (entry.recency != null ? entry.recency : 12) * HOUR;
+    await putProgress({
+      bookId: book.id,
+      cfi: null,
+      chapterIndex: idx,
+      maxChapterIndex: idx,
+      chapterLabel: label,
+      finished: false,
+      updatedAt,
+    });
+  }
+
+  renderCurrentRoute();
 }
 
 // =========================================================================

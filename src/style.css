@@ -364,17 +364,6 @@ html, body {
   cursor: pointer;
 }
 .empty__cta:hover { background: #333b4a; }
-.empty__sample {
-  display: block;
-  margin: 14px auto 0;
-  appearance: none;
-  border: 0;
-  background: transparent;
-  color: var(--text-dim);
-  font: 400 13px var(--font-ui);
-  cursor: pointer;
-}
-.empty__sample:hover { color: var(--text-muted); text-decoration: underline; }
 
 /* =========================================================================
    INFO page (book / series detail) — design 6a

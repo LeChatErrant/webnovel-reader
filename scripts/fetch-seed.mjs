@@ -1,0 +1,106 @@
+// Downloads a curated set of real, public-domain EPUBs from Project Gutenberg
+// into public/seed/, and writes public/seed/manifest.json describing how the
+// in-app dev seeder should arrange them (series grouping, reading progress,
+// the deliberately cover-less book, etc.).
+//
+// These are the light "pgNNNN.epub" editions: they keep the real cover and a
+// proper chapter list but drop the heavy interior illustrations, so each file
+// is a few hundred KB rather than 20+ MB.
+//
+// Run once (network required); the files are committed so the seeder works
+// offline. Re-run to refresh:  node scripts/fetch-seed.mjs
+//
+// The set is chosen to cover every library case the design needs to show —
+// see manifest `case` fields below.
+import { writeFileSync, mkdirSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
+
+const root = join(dirname(fileURLToPath(import.meta.url)), "..");
+const outDir = join(root, "public", "seed");
+
+// One entry per book. `series` groups volumes into a shelf; entries with no
+// `series` are standalone tiles. `started` is a 0–1 reading fraction; `recency`
+// orders the most-recently-read books (0 = freshest → the "Continue" card).
+// `noCover` strips the cover at seed time to exercise the cover-less design.
+const ENTRIES = [
+  // --- Standalone singles ---------------------------------------------------
+  { file: "frankenstein.epub",         gutenberg: 84,   started: 0.45, recency: 0,
+    case: "simple book, with cover, already started (shows completion rate)" },
+  { file: "pride-and-prejudice.epub",  gutenberg: 1342,
+    case: "simple book, with cover" },
+  { file: "the-time-machine.epub",     gutenberg: 35,   noCover: true,
+    case: "simple book, WITHOUT cover" },
+  { file: "the-yellow-wallpaper.epub", gutenberg: 1952,
+    case: "single big chapter" },
+
+  // --- Two separated volumes of the same book, first started (ungrouped) -----
+  { file: "herodotus-v1.epub",         gutenberg: 2707, started: 0.30, recency: 3,
+    case: "separated volume 1 of a book (started)" },
+  { file: "herodotus-v2.epub",         gutenberg: 2456,
+    case: "separated volume 2 of the same book" },
+
+  // --- Two books of the same series, separated (different title + cover) -----
+  { file: "a-study-in-scarlet.epub",   gutenberg: 244,
+    case: "separated series book 1 (Sherlock Holmes)" },
+  { file: "the-sign-of-the-four.epub", gutenberg: 2097,
+    case: "separated series book 2 (Sherlock Holmes)" },
+
+  // --- Shelf of multiple volumes, not started -------------------------------
+  { file: "poe-v1.epub", gutenberg: 2147, series: "The Works of Edgar Allan Poe", vol: 1,
+    case: "shelf volume 1 (not started)" },
+  { file: "poe-v2.epub", gutenberg: 2148, series: "The Works of Edgar Allan Poe", vol: 2 },
+  { file: "poe-v3.epub", gutenberg: 2149, series: "The Works of Edgar Allan Poe", vol: 3 },
+
+  // --- Shelf of multiple volumes, first started -----------------------------
+  { file: "macaulay-v1.epub", gutenberg: 2439, series: "The History of England", vol: 1, started: 0.40, recency: 2,
+    case: "shelf with the FIRST volume started" },
+  { file: "macaulay-v2.epub", gutenberg: 2612, series: "The History of England", vol: 2 },
+  { file: "macaulay-v3.epub", gutenberg: 2613, series: "The History of England", vol: 3 },
+
+  // --- Shelf of multiple volumes, one started but NOT the first -------------
+  { file: "quixote-v1.epub", gutenberg: 5921, series: "Don Quixote", vol: 1,
+    case: "shelf where a LATER volume is started, not the first" },
+  { file: "quixote-v2.epub", gutenberg: 5946, series: "Don Quixote", vol: 2, started: 0.55, recency: 1 },
+
+  // --- Shelf of two books of the same series (different title + cover) -------
+  { file: "20000-leagues.epub",   gutenberg: 164,  series: "Extraordinary Voyages", vol: 1,
+    case: "shelf of two same-series books, different titles/covers" },
+  { file: "mysterious-island.epub", gutenberg: 1268, series: "Extraordinary Voyages", vol: 2 },
+];
+
+const epubUrl = (id) => `https://www.gutenberg.org/cache/epub/${id}/pg${id}.epub`;
+
+async function download(id) {
+  const res = await fetch(epubUrl(id));
+  if (!res.status || res.status !== 200) throw new Error(`HTTP ${res.status} for ${id}`);
+  const buf = Buffer.from(await res.arrayBuffer());
+  if (buf.length < 1000) throw new Error(`suspiciously small file for ${id}`);
+  return buf;
+}
+
+mkdirSync(outDir, { recursive: true });
+
+let total = 0;
+for (const e of ENTRIES) {
+  const buf = await download(e.gutenberg);
+  writeFileSync(join(outDir, e.file), buf);
+  total += buf.length;
+  console.log(`${e.file.padEnd(24)} ${(buf.length / 1024).toFixed(0).padStart(5)} KB  (Gutenberg #${e.gutenberg})`);
+}
+
+// Runtime manifest: strip the build-only `gutenberg`/`case` fields — the app
+// only needs how to arrange the files.
+const manifest = {
+  note: "Dev seed set — real public-domain EPUBs from Project Gutenberg. Generated by scripts/fetch-seed.mjs.",
+  entries: ENTRIES.map(({ file, series, vol, started, recency, noCover }) => ({
+    file,
+    ...(series ? { series, vol } : {}),
+    ...(started ? { started } : {}),
+    ...(recency != null ? { recency } : {}),
+    ...(noCover ? { noCover: true } : {}),
+  })),
+};
+writeFileSync(join(outDir, "manifest.json"), JSON.stringify(manifest, null, 2) + "\n");
+
+console.log(`\nWrote ${ENTRIES.length} epubs + manifest.json to public/seed/ (${(total / 1024 / 1024).toFixed(1)} MB total)`);

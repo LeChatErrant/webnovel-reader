@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite --host",
     "build": "vite build",
-    "preview": "vite preview --host"
+    "preview": "vite preview --host",
+    "seed:fetch": "node scripts/fetch-seed.mjs"
   },
   "dependencies": {
     "epubjs": "^0.3.93"
