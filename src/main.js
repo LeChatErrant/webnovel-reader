@@ -2511,8 +2511,10 @@ function pickFiles() {
 // Dev seeding — a hidden reset that fills the library with a fixed set of
 // real, public-domain books covering every design case (with/without cover,
 // started/unstarted, loose volumes, and shelves). Triggered by a long-press on
-// the Import tile (or the empty-state Import button). It is a *reset*: it wipes
-// the current library first, so calling it repeatedly never duplicates.
+// the Import tile (or the empty-state Import button). It re-seeds the demo set:
+// it clears only the books and shelves it previously seeded (tagged with
+// `seeded: true`), leaving any real imported books untouched, so calling it
+// repeatedly never duplicates the demo set and never destroys real content.
 //
 // The books live in public/seed/ with a manifest describing how to arrange
 // them; see scripts/fetch-seed.mjs. They are excluded from the PWA precache, so
@@ -2524,7 +2526,7 @@ async function confirmAndSeed() {
   if (seeding) return;
   const ok = await showConfirmSheet(
     "Seed demo library",
-    "Replace the library with a fixed set of demo books? This clears everything already here.",
+    "Reset the demo books to a fixed set? This only replaces previously seeded books — your real imported books are left untouched.",
     "Seed"
   );
   if (!ok) return;
@@ -2539,16 +2541,32 @@ async function confirmAndSeed() {
   }
 }
 
-// Wipe every stored book, series and reading position — in memory and on disk.
-async function resetLibrary() {
-  await Promise.all([dbClear("books"), dbClear("series"), dbClear("progress")]);
-  for (const url of coverUrls.values()) URL.revokeObjectURL(url);
-  coverUrls.clear();
-  books = [];
-  series = [];
-  for (const k of Object.keys(progressMap)) delete progressMap[k];
-  ui.lastReadBookId = null;
-  ui.dismissedKeys = [];
+// Remove only previously-seeded books, shelves and reading positions — in
+// memory and on disk. Real imported content (anything without `seeded: true`)
+// is left completely untouched.
+async function clearSeededContent() {
+  const seededBooks = books.filter((b) => b.seeded);
+  const seededSeries = series.filter((s) => s.seeded);
+
+  await Promise.all([
+    ...seededBooks.map((b) => dbDelete("books", b.id)),
+    ...seededBooks.map((b) => dbDelete("progress", b.id)),
+    ...seededSeries.map((s) => dbDelete("series", s.id)),
+  ]);
+
+  for (const b of seededBooks) {
+    if (coverUrls.has(b.id)) {
+      URL.revokeObjectURL(coverUrls.get(b.id));
+      coverUrls.delete(b.id);
+    }
+    delete progressMap[b.id];
+    if (ui.lastReadBookId === b.id) ui.lastReadBookId = null;
+  }
+
+  const seededBookIds = new Set(seededBooks.map((b) => b.id));
+  const seededSeriesIds = new Set(seededSeries.map((s) => s.id));
+  books = books.filter((b) => !seededBookIds.has(b.id));
+  series = series.filter((s) => !seededSeriesIds.has(s.id));
   await saveUi();
 }
 
@@ -2556,17 +2574,16 @@ async function seedDemoLibrary() {
   const manifest = await (await fetch("./seed/manifest.json")).json();
   const entries = manifest.entries || [];
 
-  await resetLibrary();
+  await clearSeededContent();
 
   // 1. Import every epub (order preserved so the shelf reads intentionally).
   const rows = []; // { entry, book }
   for (const entry of entries) {
     const buffer = await (await fetch("./seed/" + entry.file)).arrayBuffer();
     const book = await createBook(buffer, entry.file);
-    if (entry.noCover) {
-      book.coverBlob = null;
-      await dbPut("books", book);
-    }
+    book.seeded = true;
+    if (entry.noCover) book.coverBlob = null;
+    await dbPut("books", book);
     rows.push({ entry, book });
   }
 
@@ -2581,7 +2598,7 @@ async function seedDemoLibrary() {
     bySeries.get(entry.series).push({ entry, book });
   }
   for (const [name, members] of bySeries) {
-    const s = { id: uid(), name, author: members[0].book.author || "", bookIds: [] };
+    const s = { id: uid(), name, author: members[0].book.author || "", bookIds: [], seeded: true };
     members.forEach(({ entry, book }, i) => {
       book.seriesId = s.id;
       book.volumeIndex = entry.vol || i + 1;
