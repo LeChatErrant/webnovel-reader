@@ -1135,6 +1135,14 @@ html, body {
    the library. It's a flex sibling of .lib-body, so it stays at the very
    bottom of the screen while the book list scrolls above it.
    ====================================================================== */
+/* Persistent library footer: install line (until installed) over an
+   always-present version + "Check for updates" line. The footer owns the top
+   border and the bottom safe-area inset; its children stay flush. */
+.lib-footer {
+  flex: 0 0 auto;
+  border-top: 1px solid var(--border);
+  padding-bottom: env(safe-area-inset-bottom);
+}
 .install-note {
   appearance: none;
   flex: 0 0 auto;
@@ -1143,9 +1151,8 @@ html, body {
   justify-content: center;
   gap: 7px;
   width: 100%;
-  padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
+  padding: 11px 12px 3px;
   border: 0;
-  border-top: 1px solid var(--border);
   background: transparent;
   color: var(--text-dim);
   font-size: 12.5px;
@@ -1155,14 +1162,14 @@ html, body {
 .install-note:hover { color: var(--text-secondary); }
 .install-note svg { flex: 0 0 auto; }
 
-/* Version line + "Check for updates" inside the install sheet. */
-.sheet-version {
-  margin: 16px 0 0;
+.lib-footer__ver {
+  margin: 0;
+  padding: 9px 12px 10px;
   font: 400 11.5px var(--font-ui);
   color: var(--text-dimmest);
   text-align: center;
 }
-.sheet-version button {
+.lib-footer__ver button {
   appearance: none;
   border: 0;
   padding: 0;
@@ -1173,8 +1180,8 @@ html, body {
   text-decoration: underline;
   cursor: pointer;
 }
-.sheet-version button:hover { color: var(--text-muted); }
-.sheet-version__status { margin-left: 8px; color: var(--text-muted); }
+.lib-footer__ver button:hover { color: var(--text-muted); }
+.lib-footer__status { margin-left: 8px; color: var(--text-muted); }
 
 /* =========================================================================
    Update banner — a bottom toast shown when a newer app version has installed

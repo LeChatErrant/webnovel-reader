@@ -35,15 +35,23 @@
           <input id="lib-search-input" class="lib-search-input" type="search" placeholder="Search your library" autocomplete="off" />
         </div>
         <div id="lib-body" class="lib-body"></div>
-        <!-- Persistent, unobtrusive install line pinned to the bottom of the
-             library. No dismiss state — it's the standing entry point to install. -->
-        <button id="install-note" class="install-note" type="button" hidden>
-          <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">
-            <path d="M12 4v10m0 0l-3.5-3.5M12 14l3.5-3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
-            <path d="M5 18.5h14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
-          </svg>
-          <span>Add to Home Screen for offline reading</span>
-        </button>
+        <!-- Persistent library footer, pinned to the bottom. The version line
+             always shows (installed or not); the Add-to-Home-Screen line sits
+             above it until the app is installed. -->
+        <footer class="lib-footer">
+          <button id="install-note" class="install-note" type="button" hidden>
+            <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">
+              <path d="M12 4v10m0 0l-3.5-3.5M12 14l3.5-3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M5 18.5h14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+            </svg>
+            <span>Add to Home Screen for offline reading</span>
+          </button>
+          <p class="lib-footer__ver">
+            Version <span id="app-version">—</span>
+            <button id="check-update" type="button">Check for updates</button>
+            <span id="update-status" class="lib-footer__status" role="status"></span>
+          </p>
+        </footer>
       </section>
 
       <!-- =====================================================================
@@ -204,11 +212,6 @@
             <li>Tap <strong>Add</strong>, then launch it from your Home Screen.</li>
           </ol>
           <button id="install-sheet-close" class="pill-btn">Got it</button>
-          <p class="sheet-version">
-            Version <span id="app-version">—</span>
-            <button id="check-update" type="button">Check for updates</button>
-            <span id="update-status" class="sheet-version__status" role="status"></span>
-          </p>
         </div>
       </div>
 
