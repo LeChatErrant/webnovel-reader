@@ -219,6 +219,11 @@ function chapterOrdinalFor(book, p) {
 // pixel scrolling into view (trailing whitespace, the injected end-of-chapter
 // card), so anything at or past this fraction counts as complete.
 const CHAPTER_DONE_PCT = 92;
+// Opening a chapter must not, by itself, register progress or completion — the
+// reader has to actually move this far past where the chapter opened before it
+// counts as started. Keeps a stray tap off the "reading"/done state and off the
+// resume chip.
+const MIN_SCROLL_PCT = 5;
 // Strip the fragment from an href so a spine section and its TOC anchor share a
 // key. Defined here (not down in the reader) because the per-chapter progress
 // map below is keyed by it.
@@ -241,6 +246,17 @@ function chapterProgress(book, href) {
 function chapterDone(book, href) {
   const st = chapterProgress(book, href);
   return !!(st && st.done);
+}
+// Chapter skipping: mark every readable chapter before `href` complete, in place
+// on a chapters map. Finishing a chapter implies the ones before it are read.
+function markEarlierDone(book, href, chapters) {
+  const readable = readableChapters(book.chapters || []);
+  const idx = readable.findIndex((e) => baseHref(e.href) === baseHref(href));
+  for (let i = 0; i < idx; i++) {
+    const k = baseHref(readable[i].href);
+    if (!k || chapters[k]?.done) continue;
+    chapters[k] = { pct: 100, cfi: chapters[k]?.cfi || null, done: true };
+  }
 }
 // Number of readable chapters completed in this book.
 function doneCount(book) {
@@ -2119,6 +2135,9 @@ let currentHref = null;
 let resumeDismissed = new Set();
 let resumeChipEl = null;
 let resumeChipHref = null;
+// Where the current chapter first appeared, so we can measure how far the reader
+// scrolled from there (see MIN_SCROLL_PCT) before crediting any progress.
+let chapterEntryBaseline = { href: null, pct: 0 };
 
 // Persist an epub.js location as the current reading position. Called on every
 // `relocated` while scrolling, and once more when the app is backgrounded so
@@ -2142,14 +2161,28 @@ function saveReadingLocation(location) {
   // to, not where you scrolled back to); done is sticky once the end is reached.
   const chapters = { ...(prev?.chapters || {}) };
   if (href) {
-    const cur = chapters[href] || { pct: 0, cfi: null, done: false };
-    const pct = rawPct == null ? cur.pct || 0 : Math.max(cur.pct || 0, rawPct);
-    const advanced = rawPct != null && rawPct >= (cur.pct || 0);
-    chapters[href] = {
-      pct,
-      cfi: advanced && location.start.cfi ? location.start.cfi : cur.cfi || location.start.cfi || null,
-      done: cur.done || pct >= CHAPTER_DONE_PCT,
-    };
+    // Baseline the position each time a fresh chapter appears, then require the
+    // reader to have moved MIN_SCROLL_PCT past it before crediting anything — so
+    // merely opening a chapter (or a short, one-screen one) never self-completes
+    // and never arms the resume chip. A chapter already in progress keeps
+    // updating regardless.
+    if (chapterEntryBaseline.href !== href) chapterEntryBaseline = { href, pct: rawPct ?? 0 };
+    const scrolled = rawPct == null ? 0 : rawPct - chapterEntryBaseline.pct;
+    const cur = chapters[href];
+    const started = (cur && (cur.pct || 0) > 0) || scrolled >= MIN_SCROLL_PCT;
+    if (started) {
+      const base = cur || { pct: 0, cfi: null, done: false };
+      const pct = rawPct == null ? base.pct || 0 : Math.max(base.pct || 0, rawPct);
+      const advanced = rawPct != null && rawPct >= (base.pct || 0);
+      const done = base.done || (pct >= CHAPTER_DONE_PCT && scrolled >= MIN_SCROLL_PCT);
+      chapters[href] = {
+        pct,
+        cfi: advanced && location.start.cfi ? location.start.cfi : base.cfi || location.start.cfi || null,
+        done,
+      };
+      // Chapter skipping: finishing a chapter completes every earlier one too.
+      if (done && !base.done) markEarlierDone(lib, href, chapters);
+    }
   }
 
   // A book is finished once every readable chapter is done; the flag is sticky.
@@ -2207,6 +2240,7 @@ async function renderReader(lib, startHref = null) {
   // Fresh book: forget any resume-chip dismissals and clear a stale chip.
   resumeDismissed = new Set();
   hideResumeChip();
+  chapterEntryBaseline = { href: null, pct: 0 };
   updateChapterTitle(null);
   el.topTitle.textContent = displayTitle(lib);
   document.title = displayTitle(lib);
@@ -2448,7 +2482,7 @@ function maybeShowResumeChip(href) {
       },
     },
     h("span", { class: "resume-chip__label" }, "Resume where you left off"),
-    h("span", { class: "resume-chip__pct" }, `${st.pct} %`)
+    h("span", { class: "resume-chip__pct" }, `· ${st.pct} %`)
   );
   const dismiss = h(
     "button",
