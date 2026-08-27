@@ -23,9 +23,9 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
@@ -36,10 +36,10 @@ jobs:
 
       # Pages is already enabled on the repo (build type = GitHub Actions),
       # so this just wires up the deployment for the artifact upload.
-      - uses: actions/configure-pages@v5
+      - uses: actions/configure-pages@v6
 
       # Upload the built site (dist/) as the Pages artifact.
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v4
         with:
           path: dist
 
@@ -51,4 +51,4 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
