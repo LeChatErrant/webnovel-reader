@@ -190,6 +190,26 @@ function furthestIndex(book) {
   if (!p) return -1;
   return Math.max(p.maxChapterIndex ?? -1, p.chapterIndex ?? 0);
 }
+// The furthest chapter reached, as a 1-based ordinal over the readable TOC (the
+// same basis chapterOrdinalFor uses for the resume point). This drives the
+// read/unread checkmarks, so jumping *back* into an earlier chapter never
+// un-checks the ones beyond it — completion is measured from the high-water
+// mark, only the "current" marker follows where you stopped.
+//
+// furthestIndex is a *spine* index (front matter included); the readable TOC has
+// front matter removed. Map between them by counting the readable entries at or
+// before that spine position, so only front matter that actually precedes the
+// chapter is discounted — subtracting the whole book's front-matter count would
+// under-report whenever a licence/boilerplate page trails the real chapters.
+function furthestOrdinalFor(book) {
+  const fi = furthestIndex(book);
+  if (fi < 0) return 0;
+  const chs = book.chapters || [];
+  let ord = 0;
+  for (let i = 0; i <= fi && i < chs.length; i++) if (!isFrontMatter(chs[i].label)) ord++;
+  const len = readableChapters(chs).length || Infinity;
+  return Math.min(len, Math.max(1, ord));
+}
 function bookPercent(book) {
   const p = progressMap[book.id];
   if (p?.finished) return 100;
@@ -1403,12 +1423,15 @@ function chaptersModel(kind, id) {
       const offset = volumeChapterOffset(vol);
       const finished = bookPercent(vol) >= 100;
       const started = bookIsStarted(vol);
+      // Read up to the furthest chapter reached (not the resume point); the
+      // "current" marker is the resume point, shown only on the reading volume.
+      const furthestLocal = furthestOrdinalFor(vol) - 1;
       chs.forEach((e, i) => {
         let state;
-        if (cur && vol.id === cur.id && !finished) state = i < curLocal ? "read" : i === curLocal ? "current" : "unread";
-        else if (finished) state = "read";
+        if (finished) state = "read";
         else if (!started) state = "unread";
-        else state = i < curLocal ? "read" : "unread";
+        else if (cur && vol.id === cur.id && i === curLocal) state = "current";
+        else state = i <= furthestLocal ? "read" : "unread";
         items.push({ absNum: offset + i + 1, label: e.label, href: e.href, bookId: vol.id, localIndex: i, state });
       });
     }
@@ -1426,11 +1449,14 @@ function chaptersModel(kind, id) {
   const finished = bookPercent(b) >= 100;
   const started = bookIsStarted(b);
   const curLocal = p ? chapterOrdinalFor(b, p) - 1 : -1;
+  // Read up to the furthest chapter reached; "current" marks the resume point.
+  const furthestLocal = furthestOrdinalFor(b) - 1;
   const items = chs.map((e, i) => {
     let state;
     if (finished) state = "read";
     else if (!started) state = "unread";
-    else state = i < curLocal ? "read" : i === curLocal ? "current" : "unread";
+    else if (i === curLocal) state = "current";
+    else state = i <= furthestLocal ? "read" : "unread";
     return { absNum: i + 1, label: e.label, href: e.href, bookId: b.id, localIndex: i, state };
   });
   const curItem = items.find((it) => it.state === "current");
@@ -2240,11 +2266,13 @@ function updateDrawerBook() {
 
 // The drawer lists every chapter of the current book (the current volume, for
 // a book inside a series). The list scrolls within the drawer and is scrolled
-// to the current chapter on open via highlightToc. Chapters before the one
-// you're on are marked read — dimmed with a check — to match the full Chapters
-// screen and its previews; the current chapter keeps its highlight (via
-// highlightToc), and the rest read as unread. For a book inside a series the
-// rows carry absolute numbers, so "Ch. 351" in vol. 2 stays "Ch. 351".
+// to the current chapter on open via highlightToc. Chapters up to the furthest
+// one ever reached are marked read — dimmed with a check — to match the full
+// Chapters screen and its previews; jumping *back* into an earlier chapter never
+// un-checks the ones beyond it. The chapter you're on keeps its highlight (via
+// highlightToc) instead of a check, and anything past the furthest mark reads as
+// unread. For a book inside a series the rows carry absolute numbers, so
+// "Ch. 351" in vol. 2 stays "Ch. 351".
 function renderToc() {
   el.tocList.innerHTML = "";
   const total = flatToc.length;
@@ -2253,11 +2281,12 @@ function renderToc() {
   const offset = inSeries ? volumeChapterOffset(currentBook) : 0;
   const curBase = baseHref(currentHref);
   const curIdx = curBase ? flatToc.findIndex((e) => baseHref(e.href) === curBase) : -1;
+  const furthestLocal = currentBook ? furthestOrdinalFor(currentBook) - 1 : -1;
   for (let i = 0; i < total; i++) {
     const entry = flatToc[i];
     const text = entry.label || "Untitled";
     const label = inSeries ? `${offset + i + 1} · ${text}` : text;
-    const read = curIdx >= 0 && i < curIdx;
+    const read = i !== curIdx && i <= furthestLocal;
     const cls = "toc-item" + (entry.depth ? " depth-" + Math.min(entry.depth, 2) : "") + (read ? " toc-item--read" : "");
     const btn = h(
       "button",
