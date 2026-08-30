@@ -1589,6 +1589,10 @@ function chaptersModel(kind, id) {
       kind, id, series: s, vols, book: null, title: s.name, items,
       currentAbs: curItem ? curItem.absNum : null,
       currentPercent: curItem ? curItem.pct : undefined,
+      // Where the Chapters screen pre-scrolls: the current (resume) chapter when
+      // one exists, otherwise the last-read chapter — so a finished book still
+      // lands on where you left off, not back at chapter 1.
+      scrollAnchorAbs: scrollAnchorFor(items, curItem, cur?.id, curLocal),
     };
   }
   const b = bookById(id);
@@ -1606,7 +1610,21 @@ function chaptersModel(kind, id) {
     kind, id, series: null, vols: null, book: b, title: displayTitle(b), items,
     currentAbs: curItem ? curItem.absNum : null,
     currentPercent: curItem ? curItem.pct : undefined,
+    scrollAnchorAbs: scrollAnchorFor(items, curItem, b.id, curLocal),
   };
+}
+
+// Absolute number of the row the Chapters screen should open scrolled to: the
+// current (resume) chapter if there is one, else the last-read chapter (the
+// resume ordinal in the current volume, even though it is now marked "read"),
+// else null (an unopened book stays at the top).
+function scrollAnchorFor(items, curItem, curBookId, curLocal) {
+  if (curItem) return curItem.absNum;
+  if (curBookId && curLocal >= 0) {
+    const anchor = items.find((it) => it.bookId === curBookId && it.localIndex === curLocal);
+    if (anchor) return anchor.absNum;
+  }
+  return null;
 }
 
 // Push the Chapters screen. `volId` presets the volume filter (from a volume
@@ -1869,10 +1887,13 @@ function updateChapterList(m, scrollToCurrent = false) {
 
 function chRow(m, it) {
   const cls = "ch-row ch-row--" + it.state;
+  const ds = {};
+  if (it.state === "current") ds.current = "1";
+  if (it.absNum === m.scrollAnchorAbs) ds.anchor = "1"; // pre-scroll target
   if (it.state === "current" || it.state === "reading") {
     return h(
       "button",
-      { class: cls, dataset: it.state === "current" ? { current: "1" } : {}, onclick: () => chOpen(it) },
+      { class: cls, dataset: ds, onclick: () => chOpen(it) },
       h("span", { class: "ch-row__num" }, String(it.absNum)),
       h(
         "span",
@@ -1884,7 +1905,7 @@ function chRow(m, it) {
   }
   return h(
     "button",
-    { class: cls, onclick: () => chOpen(it) },
+    { class: cls, dataset: ds, onclick: () => chOpen(it) },
     h("span", { class: "ch-row__num" }, String(it.absNum)),
     h("span", { class: "ch-row__title" }, it.label || "Untitled"),
     it.state === "read" ? h("span", { class: "ch-row__check" }, svg(ICON.check)) : null
@@ -1899,7 +1920,7 @@ function chOpen(it) {
 }
 
 function scrollToCurrentRow() {
-  const cur = chEls?.list.querySelector("[data-current]");
+  const cur = chEls?.list.querySelector("[data-anchor]") || chEls?.list.querySelector("[data-current]");
   if (cur) cur.scrollIntoView({ block: "center" });
 }
 
