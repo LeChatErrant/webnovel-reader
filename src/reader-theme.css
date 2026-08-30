@@ -203,7 +203,7 @@ html { scrollbar-width: none !important; }
    margin here gets clipped and the card sits flush against the screen edge. */
 .chapter-end {
   margin: 3.25em 0 0 !important;
-  padding-bottom: 4.75em !important;
+  padding-bottom: 2em !important;
 }
 .chapter-end__label {
   display: flex !important;
