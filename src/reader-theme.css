@@ -101,31 +101,94 @@ hr {
 html { scrollbar-width: none !important; }
 ::-webkit-scrollbar { width: 0 !important; height: 0 !important; display: none !important; }
 
-/* End-of-chapter navigation block (injected by the app into each chapter).
-   Kept deliberately quiet: a hairline rule, a small label, and two plain
-   text links -- no filled buttons -- so it reads as part of the page. The
-   generous bottom margin gives the last line room to breathe above the
-   screen edge (and any phone home indicator). */
+/* End-of-chapter block (injected by the app into each chapter). A centred
+   divider label with hairlines on either side, then a single clean card that
+   names the next chapter. The generous bottom margin gives the last line room
+   to breathe above the screen edge (and any phone home indicator). */
 .chapter-end {
   margin: 3.5em 0 3em !important;
-  padding-top: 1.8em !important;
-  border-top: 1px solid #2b2e38 !important;
 }
 .chapter-end__label {
-  text-align: center !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 14px !important;
   font-family: system-ui, -apple-system, sans-serif !important;
   font-size: 11px !important;
   letter-spacing: 0.16em !important;
   text-transform: uppercase !important;
   color: #6a6c78 !important;
-  margin-bottom: 1.5em !important;
+  margin-bottom: 1.6em !important;
 }
-.chapter-end__nav {
+.chapter-end__label::before,
+.chapter-end__label::after {
+  content: "" !important;
+  flex: 1 1 0 !important;
+  height: 1px !important;
+  background: #2b2e38 !important;
+}
+.chapter-end__label-text { white-space: nowrap !important; }
+
+/* The next-chapter card. Whole thing is one tap target. */
+.chapter-end .cn-card {
+  display: block !important;
+  width: 100% !important;
+  text-align: left !important;
+  background: #23262f !important;
+  border: 1px solid #2f323d !important;
+  border-radius: 14px !important;
+  padding: 13px 16px 15px !important;
+  cursor: pointer !important;
+  font-family: system-ui, -apple-system, sans-serif !important;
+  -webkit-tap-highlight-color: transparent !important;
+  transition: background 0.15s, border-color 0.15s !important;
+}
+.chapter-end .cn-card:hover { background: #262a34 !important; border-color: #3a3e4b !important; }
+.chapter-end .cn-card:active { background: #20232c !important; }
+.chapter-end .cn-card__kicker {
+  font-size: 11px !important;
+  letter-spacing: 0.14em !important;
+  text-transform: uppercase !important;
+  color: #6a6c78 !important;
+  margin-bottom: 7px !important;
+}
+.chapter-end .cn-card__row {
   display: flex !important;
-  justify-content: space-between !important;
   align-items: center !important;
-  gap: 16px !important;
+  gap: 14px !important;
 }
+.chapter-end .cn-card__main {
+  flex: 1 1 auto !important;
+  min-width: 0 !important;
+  display: flex !important;
+  align-items: baseline !important;
+  gap: 12px !important;
+}
+.chapter-end .cn-card__num {
+  flex: 0 0 auto !important;
+  font-family: "Merriweather", Georgia, serif !important;
+  font-weight: 700 !important;
+  font-size: 18px !important;
+  color: #83848f !important;
+}
+.chapter-end .cn-card__title {
+  font-family: "Merriweather", Georgia, serif !important;
+  font-weight: 700 !important;
+  font-size: 18px !important;
+  color: #c8cad3 !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+.chapter-end .cn-card__chev {
+  flex: 0 0 auto !important;
+  font-size: 22px !important;
+  line-height: 1 !important;
+  color: #6a6c78 !important;
+  transition: color 0.15s !important;
+}
+.chapter-end .cn-card:hover .cn-card__chev { color: #9aa6c9 !important; }
+
+/* Shared base for the volume-boundary buttons below. */
 .chapter-end .cn-btn {
   font-family: system-ui, -apple-system, sans-serif !important;
   font-size: 14.5px !important;
@@ -136,13 +199,6 @@ html { scrollbar-width: none !important; }
   cursor: pointer !important;
   transition: color 0.15s !important;
 }
-.chapter-end .cn-prev { color: #83848f !important; }
-.chapter-end .cn-prev:hover { color: #a9aab3 !important; }
-.chapter-end .cn-next { color: #9aa6c9 !important; font-weight: 600 !important; }
-.chapter-end .cn-next:hover { color: #b4bde0 !important; }
-/* At the first / last chapter the unavailable side is hidden outright, but
-   still occupies its slot so the remaining link stays pinned to its edge. */
-.chapter-end .cn-btn:disabled { visibility: hidden !important; cursor: default !important; }
 
 /* End-of-volume boundary card (a book that is part of a series). Instead of a
    silent jump, the reader shows this: the next volume's name and one primary

@@ -2589,22 +2589,38 @@ function injectChapterNav(contents) {
   if (!doc?.body || doc.querySelector(".chapter-end")) return;
   const total = book?.spine?.spineItems?.length || 0;
   const idx = typeof contents.sectionIndex === "number" ? contents.sectionIndex : -1;
-  const atStart = idx === 0;
   const atEnd = total > 0 && idx >= total - 1;
+
+  // Locate this chapter in the readable TOC so we can name/number the *next*
+  // one. Content-hook time: currentHref still points at the outgoing chapter,
+  // so resolve from this document's own spine section rather than currentHref.
+  const offset = currentBook ? volumeChapterOffset(currentBook) : 0;
+  const thisHref = book?.spine?.get?.(idx)?.href || null;
+  const tocIdx = thisHref ? flatToc.findIndex((e) => baseHref(e.href) === baseHref(thisHref)) : -1;
+  const curNum = tocIdx >= 0 ? tocIdx + 1 + offset : null;
+  const nextEntry = tocIdx >= 0 ? flatToc[tocIdx + 1] || null : null;
+  const nextNum = nextEntry ? tocIdx + 2 + offset : null;
+  // The last chapter of this book/volume — no in-book "next".
+  const lastChapter = atEnd || !nextEntry;
+
+  const inSeries = currentBook?.seriesId && seriesById(currentBook.seriesId);
 
   const wrap = doc.createElement("div");
   wrap.className = "chapter-end";
-  const next = currentBook ? nextVolume(currentBook) : null;
-  const inSeries = currentBook?.seriesId && seriesById(currentBook.seriesId);
-  const volLabel = inSeries ? "End of Vol. " + volumeNumber(seriesById(currentBook.seriesId), currentBook) : "End of book";
 
   const label = doc.createElement("div");
   label.className = "chapter-end__label";
-  label.textContent = atEnd ? volLabel : "End of chapter";
+  const labelText = doc.createElement("span");
+  labelText.className = "chapter-end__label-text";
+  labelText.textContent = lastChapter
+    ? (inSeries ? "End of Vol. " + volumeNumber(seriesById(currentBook.seriesId), currentBook) : "End of book")
+    : "End of chapter" + (curNum ? " " + curNum : "");
+  label.appendChild(labelText);
   wrap.appendChild(label);
 
-  if (atEnd && inSeries) {
-    // Volume boundary card.
+  if (lastChapter && inSeries) {
+    // Volume boundary card — continue into the next volume of the series.
+    const next = currentBook ? nextVolume(currentBook) : null;
     const card = doc.createElement("div");
     card.className = "vol-boundary";
     if (next) {
@@ -2634,23 +2650,45 @@ function injectChapterNav(contents) {
       card.appendChild(add);
     }
     wrap.appendChild(card);
-  } else {
-    const nav = doc.createElement("div");
-    nav.className = "chapter-end__nav";
-    const prev = doc.createElement("button");
-    prev.className = "cn-btn cn-prev";
-    prev.textContent = "← Previous";
-    prev.disabled = atStart;
-    prev.addEventListener("click", () => goChapter(-1));
-    const nx = doc.createElement("button");
-    nx.className = "cn-btn cn-next";
-    nx.textContent = "Next chapter →";
-    nx.disabled = atEnd;
-    nx.addEventListener("click", () => goChapter(1));
-    nav.appendChild(prev);
-    nav.appendChild(nx);
-    wrap.appendChild(nav);
+  } else if (!lastChapter) {
+    // Clean single next-chapter card: a quiet kicker over the next chapter's
+    // number + title, with a chevron. (Previous is intentionally omitted — the
+    // top bar already carries chapter-back navigation.)
+    const card = doc.createElement("button");
+    card.className = "cn-card";
+    card.setAttribute("aria-label", "Next chapter" + (nextNum != null ? " " + nextNum : "") + (nextEntry.label ? ", " + nextEntry.label : ""));
+    card.addEventListener("click", () => displayChapterTop(nextEntry.href));
+
+    const kicker = doc.createElement("div");
+    kicker.className = "cn-card__kicker";
+    kicker.textContent = "Next chapter";
+
+    const row = doc.createElement("div");
+    row.className = "cn-card__row";
+    const main = doc.createElement("div");
+    main.className = "cn-card__main";
+    if (nextNum != null) {
+      const num = doc.createElement("span");
+      num.className = "cn-card__num";
+      num.textContent = String(nextNum);
+      main.appendChild(num);
+    }
+    const title = doc.createElement("span");
+    title.className = "cn-card__title";
+    title.textContent = (nextEntry.label || "").trim() || "Untitled";
+    main.appendChild(title);
+    const chev = doc.createElement("span");
+    chev.className = "cn-card__chev";
+    chev.textContent = "›";
+    row.appendChild(main);
+    row.appendChild(chev);
+
+    card.appendChild(kicker);
+    card.appendChild(row);
+    wrap.appendChild(card);
   }
+  // else: last chapter of a standalone book — just the "End of book" label.
+
   doc.body.appendChild(wrap);
 }
 
