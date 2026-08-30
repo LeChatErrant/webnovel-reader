@@ -39,7 +39,7 @@ jobs:
       - uses: actions/configure-pages@v6
 
       # Upload the built site (dist/) as the Pages artifact.
-      - uses: actions/upload-pages-artifact@v4
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: dist
 
