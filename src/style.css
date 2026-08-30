@@ -300,10 +300,10 @@ html, body {
 .tile__cover { aspect-ratio: 2 / 3; border-radius: 5px; }
 .tile__title {
   margin-top: 9px;
-  font-size: 14.5px;
-  font-weight: 600;
+  font-size: 12.5px;
+  font-weight: 500;
   line-height: 1.3;
-  color: var(--text-secondary);
+  color: var(--text-body);
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
@@ -454,7 +454,7 @@ html, body {
   border-radius: 6px;
   box-shadow: 0 14px 34px rgba(0, 0, 0, 0.45);
 }
-.info-hero__title { font: 500 19px/1.2 var(--font-serif); color: #eef1f5; }
+.info-hero__title { font: 500 25px/1.2 var(--font-serif); color: #eef1f5; }
 .info-hero__author { margin-top: 8px; font: 400 13.5px var(--font-ui); color: var(--text-muted); }
 
 .info-actions { display: flex; justify-content: center; gap: 10px; padding: 20px 24px 0; }
