@@ -2584,6 +2584,22 @@ function injectReaderTheme(contents) {
   (doc.head || doc.documentElement).appendChild(style);
 }
 
+// Split a TOC label into its own embedded chapter number (if any) and a clean
+// title. Many books label chapters "Chapter 230: Precarious Alliance" (or
+// "Ch. 230 - ...", "230. ..."); the embedded number is the one the reader sees
+// in the top bar, and it can differ from the positional ordinal when the book
+// carries front matter. Bare-title books ("Ashen Barrens") return num: null so
+// callers can fall back to the positional ordinal.
+function parseChapterLabel(label) {
+  const s = (label || "").trim();
+  let m = s.match(/^(?:chapters?|chap|ch|episodes?|ep|parts?|vol(?:ume)?)\.?\s*(\d+)\s*[:.\-–—)]*\s*(.*)$/i);
+  if (m) return { num: parseInt(m[1], 10), title: m[2].trim() };
+  if (/^\d+$/.test(s)) return { num: parseInt(s, 10), title: "" };
+  m = s.match(/^(\d+)\s*[:.\-–—)]\s*(.*)$/);
+  if (m) return { num: parseInt(m[1], 10), title: m[2].trim() };
+  return { num: null, title: s };
+}
+
 function injectChapterNav(contents) {
   const doc = contents.document;
   if (!doc?.body || doc.querySelector(".chapter-end")) return;
@@ -2597,9 +2613,13 @@ function injectChapterNav(contents) {
   const offset = currentBook ? volumeChapterOffset(currentBook) : 0;
   const thisHref = book?.spine?.get?.(idx)?.href || null;
   const tocIdx = thisHref ? flatToc.findIndex((e) => baseHref(e.href) === baseHref(thisHref)) : -1;
-  const curNum = tocIdx >= 0 ? tocIdx + 1 + offset : null;
   const nextEntry = tocIdx >= 0 ? flatToc[tocIdx + 1] || null : null;
-  const nextNum = nextEntry ? tocIdx + 2 + offset : null;
+  // Prefer the chapter's own embedded number (matches the top bar) over the
+  // positional ordinal, which drifts when the book has front matter.
+  const curParsed = tocIdx >= 0 ? parseChapterLabel(flatToc[tocIdx]?.label) : { num: null, title: "" };
+  const curNum = curParsed.num ?? (tocIdx >= 0 ? tocIdx + 1 + offset : null);
+  const nextParsed = nextEntry ? parseChapterLabel(nextEntry.label) : { num: null, title: "" };
+  const nextNum = nextEntry ? (nextParsed.num ?? tocIdx + 2 + offset) : null;
   // The last chapter of this book/volume — no in-book "next".
   const lastChapter = atEnd || !nextEntry;
 
@@ -2656,7 +2676,7 @@ function injectChapterNav(contents) {
     // top bar already carries chapter-back navigation.)
     const card = doc.createElement("button");
     card.className = "cn-card";
-    card.setAttribute("aria-label", "Next chapter" + (nextNum != null ? " " + nextNum : "") + (nextEntry.label ? ", " + nextEntry.label : ""));
+    card.setAttribute("aria-label", "Next chapter" + (nextNum != null ? " " + nextNum : "") + (nextParsed.title ? ", " + nextParsed.title : ""));
     card.addEventListener("click", () => displayChapterTop(nextEntry.href));
 
     const kicker = doc.createElement("div");
@@ -2673,10 +2693,16 @@ function injectChapterNav(contents) {
       num.textContent = String(nextNum);
       main.appendChild(num);
     }
-    const title = doc.createElement("span");
-    title.className = "cn-card__title";
-    title.textContent = (nextEntry.label || "").trim() || "Untitled";
-    main.appendChild(title);
+    // Use the parsed title so a "Chapter N:" prefix isn't repeated next to the
+    // number; fall back to the raw label only for bare-title books (no embedded
+    // number). A numbered-but-titleless chapter shows just its number.
+    const titleText = nextParsed.title || (nextParsed.num == null ? (nextEntry.label || "").trim() : "");
+    if (titleText) {
+      const title = doc.createElement("span");
+      title.className = "cn-card__title";
+      title.textContent = titleText;
+      main.appendChild(title);
+    }
     const chev = doc.createElement("span");
     chev.className = "cn-card__chev";
     chev.textContent = "›";

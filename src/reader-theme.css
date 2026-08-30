@@ -106,7 +106,7 @@ html { scrollbar-width: none !important; }
    names the next chapter. The generous bottom margin gives the last line room
    to breathe above the screen edge (and any phone home indicator). */
 .chapter-end {
-  margin: 3.5em 0 3em !important;
+  margin: 3.25em 0 4.75em !important;
 }
 .chapter-end__label {
   display: flex !important;
@@ -133,55 +133,55 @@ html { scrollbar-width: none !important; }
   display: block !important;
   width: 100% !important;
   text-align: left !important;
-  background: #23262f !important;
-  border: 1px solid #2f323d !important;
-  border-radius: 14px !important;
-  padding: 13px 16px 15px !important;
+  background: transparent !important;
+  border: 1px solid #2b2e39 !important;
+  border-radius: 11px !important;
+  padding: 9px 13px 10px !important;
   cursor: pointer !important;
   font-family: system-ui, -apple-system, sans-serif !important;
   -webkit-tap-highlight-color: transparent !important;
   transition: background 0.15s, border-color 0.15s !important;
 }
-.chapter-end .cn-card:hover { background: #262a34 !important; border-color: #3a3e4b !important; }
-.chapter-end .cn-card:active { background: #20232c !important; }
+.chapter-end .cn-card:hover { background: #23262f !important; border-color: #363a46 !important; }
+.chapter-end .cn-card:active { background: #202029 !important; }
 .chapter-end .cn-card__kicker {
-  font-size: 11px !important;
-  letter-spacing: 0.14em !important;
+  font-size: 10px !important;
+  letter-spacing: 0.13em !important;
   text-transform: uppercase !important;
   color: #6a6c78 !important;
-  margin-bottom: 7px !important;
+  margin-bottom: 3px !important;
 }
 .chapter-end .cn-card__row {
   display: flex !important;
   align-items: center !important;
-  gap: 14px !important;
+  gap: 12px !important;
 }
 .chapter-end .cn-card__main {
   flex: 1 1 auto !important;
   min-width: 0 !important;
   display: flex !important;
   align-items: baseline !important;
-  gap: 12px !important;
+  gap: 9px !important;
 }
 .chapter-end .cn-card__num {
   flex: 0 0 auto !important;
   font-family: "Merriweather", Georgia, serif !important;
   font-weight: 700 !important;
-  font-size: 18px !important;
+  font-size: 15px !important;
   color: #83848f !important;
 }
 .chapter-end .cn-card__title {
   font-family: "Merriweather", Georgia, serif !important;
-  font-weight: 700 !important;
-  font-size: 18px !important;
-  color: #c8cad3 !important;
+  font-weight: 600 !important;
+  font-size: 15px !important;
+  color: #c2c4ce !important;
   overflow: hidden !important;
   text-overflow: ellipsis !important;
   white-space: nowrap !important;
 }
 .chapter-end .cn-card__chev {
   flex: 0 0 auto !important;
-  font-size: 22px !important;
+  font-size: 18px !important;
   line-height: 1 !important;
   color: #6a6c78 !important;
   transition: color 0.15s !important;
