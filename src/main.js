@@ -2575,12 +2575,25 @@ function updateChapterTitle(href) {
 // Runs on the content hook, which fires after the chapter is written but before
 // the view is displayed/shown, so the text paints already styled (no flash) and
 // with no network dependency (works offline).
+// The theme CSS references fonts as `url("/fonts/...")`. That string is injected
+// into the epub iframe, whose base URL is the book's internal document — so a
+// relative or root-absolute path won't resolve to our site (root-absolute also
+// drops the GitHub Pages project subpath). Rewrite `/fonts/` to a fully-
+// qualified URL derived from this module's own location (`../fonts/` relative to
+// /assets/*.js in prod, /fonts/ in dev), which is stable across SPA route
+// changes. The SW precaches the woff2, so this works offline too. Computed once.
+const READER_FONT_DIR = new URL("../fonts/", import.meta.url).href;
+const RESOLVED_READER_THEME_CSS = readerThemeCss.replaceAll(
+  'url("/fonts/',
+  `url("${READER_FONT_DIR}`
+);
+
 function injectReaderTheme(contents) {
   const doc = contents?.document;
   if (!doc || doc.getElementById("webnovel-theme")) return;
   const style = doc.createElement("style");
   style.id = "webnovel-theme";
-  style.textContent = readerThemeCss;
+  style.textContent = RESOLVED_READER_THEME_CSS;
   (doc.head || doc.documentElement).appendChild(style);
 }
 
@@ -2679,12 +2692,15 @@ function injectChapterNav(contents) {
     card.setAttribute("aria-label", "Next chapter" + (nextNum != null ? " " + nextNum : "") + (nextParsed.title ? ", " + nextParsed.title : ""));
     card.addEventListener("click", () => displayChapterTop(nextEntry.href));
 
+    // Left column: kicker over the number + title. The chevron is a sibling of
+    // this column so the card can centre it across the full card height.
+    const body = doc.createElement("div");
+    body.className = "cn-card__body";
+
     const kicker = doc.createElement("div");
     kicker.className = "cn-card__kicker";
     kicker.textContent = "Next chapter";
 
-    const row = doc.createElement("div");
-    row.className = "cn-card__row";
     const main = doc.createElement("div");
     main.className = "cn-card__main";
     if (nextNum != null) {
@@ -2703,14 +2719,15 @@ function injectChapterNav(contents) {
       title.textContent = titleText;
       main.appendChild(title);
     }
+    body.appendChild(kicker);
+    body.appendChild(main);
+
     const chev = doc.createElement("span");
     chev.className = "cn-card__chev";
     chev.textContent = "›";
-    row.appendChild(main);
-    row.appendChild(chev);
 
-    card.appendChild(kicker);
-    card.appendChild(row);
+    card.appendChild(body);
+    card.appendChild(chev);
     wrap.appendChild(card);
   }
   // else: last chapter of a standalone book — just the "End of book" label.

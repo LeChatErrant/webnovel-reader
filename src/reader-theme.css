@@ -1,11 +1,88 @@
-/* Injected INTO each epub chapter document by epub.js (themes.register).
-   This is what makes the text look like Webnovel's dark reader, matching the
-   KOReader setup exactly:
-     background #1f2129 · text #83848f · headings #a9aab3 · links #9aa6c9
-     Merriweather 18px / line-height 1.8 · ragged-left · no indent · spaced.
-   Font paths are absolute (/fonts/...) so they resolve against the site
-   origin, not the epub's internal base URL. */
+/* Injected INTO each epub chapter document by the app (see injectReaderTheme
+   in main.js) as an inline <style>, so the text paints already styled with no
+   network flash and works offline.
 
+   TYPOGRAPHY (2026-08-30 experiment): the book face is now Spectral (self-
+   hosted woff2, weights 300/400/500 + italics). Anything that belongs to the
+   story is Spectral; app chrome is system-ui; chapter numbers are mono.
+
+   EASY REVERT: to go back to the previous serif, set --reader-serif below to
+   `"Merriweather", Georgia, serif` — the Merriweather @font-face blocks are
+   kept for exactly that. (A full revert is `git revert` of the font commit.)
+
+   Font paths are written as `/fonts/...`; main.js rewrites the `/fonts/` prefix
+   to the app's real base URL at inject time so they resolve under the GitHub
+   Pages project subpath (and are served from the SW precache offline). */
+
+:root {
+  --reader-serif: "Spectral", Georgia, serif;
+  --reader-ui: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --reader-mono: ui-monospace, "SF Mono", "SFMono-Regular", Menlo, Consolas, monospace;
+}
+
+/* ---- Spectral (the book) — latin + latin-ext, 300/400/500 roman & italic ---- */
+@font-face {
+  font-family: "Spectral"; font-weight: 300; font-style: normal; font-display: swap;
+  src: url("/fonts/Spectral-300.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Spectral"; font-weight: 300; font-style: normal; font-display: swap;
+  src: url("/fonts/Spectral-300ext.woff2") format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: "Spectral"; font-weight: 300; font-style: italic; font-display: swap;
+  src: url("/fonts/Spectral-300Italic.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Spectral"; font-weight: 300; font-style: italic; font-display: swap;
+  src: url("/fonts/Spectral-300Italicext.woff2") format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: "Spectral"; font-weight: 400; font-style: normal; font-display: swap;
+  src: url("/fonts/Spectral-400.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Spectral"; font-weight: 400; font-style: normal; font-display: swap;
+  src: url("/fonts/Spectral-400ext.woff2") format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: "Spectral"; font-weight: 400; font-style: italic; font-display: swap;
+  src: url("/fonts/Spectral-400Italic.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Spectral"; font-weight: 400; font-style: italic; font-display: swap;
+  src: url("/fonts/Spectral-400Italicext.woff2") format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: "Spectral"; font-weight: 500; font-style: normal; font-display: swap;
+  src: url("/fonts/Spectral-500.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Spectral"; font-weight: 500; font-style: normal; font-display: swap;
+  src: url("/fonts/Spectral-500ext.woff2") format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: "Spectral"; font-weight: 500; font-style: italic; font-display: swap;
+  src: url("/fonts/Spectral-500Italic.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Spectral"; font-weight: 500; font-style: italic; font-display: swap;
+  src: url("/fonts/Spectral-500Italicext.woff2") format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+/* ---- Merriweather — kept only so --reader-serif can revert to it ---- */
 @font-face {
   font-family: "Merriweather";
   src: url("/fonts/Merriweather-Regular.ttf") format("truetype");
@@ -40,10 +117,11 @@ html {
 }
 body {
   background: #1f2129 !important;
-  color: #b4b5c0 !important;
-  font-family: "Merriweather", Georgia, serif !important;
-  font-size: 18px !important;
-  line-height: 1.8 !important;
+  color: #c6cbd3 !important;
+  font-family: var(--reader-serif) !important;
+  font-weight: 300 !important;
+  font-size: 18.5px !important;
+  line-height: 1.78 !important;
   text-align: left !important;
   /* Full-width body so epub.js sizes its view to the whole container (which is
      what makes the entire window scrollable, gutters included). The reading
@@ -59,26 +137,29 @@ body {
 }
 
 p, div, span, li, td, th, blockquote {
-  font-family: "Merriweather", Georgia, serif !important;
-  color: #b4b5c0 !important;
-  line-height: 1.8 !important;
+  font-family: var(--reader-serif) !important;
+  color: #c6cbd3 !important;
+  line-height: 1.78 !important;
 }
 
 p {
+  font-weight: 300 !important;
   text-indent: 0 !important;
-  margin: 0 0 1.35em !important;
+  margin: 0 0 20px !important;
   text-align: left !important;
 }
 
 h1, h2, h3, h4, h5, h6 {
-  color: #a9aab3 !important;
-  font-family: "Merriweather", Georgia, serif !important;
-  line-height: 1.4 !important;
+  color: #eef1f5 !important;
+  font-family: var(--reader-serif) !important;
+  font-weight: 500 !important;
+  line-height: 1.25 !important;
   text-align: left !important;
   margin: 1.2em 0 0.7em !important;
 }
-h1 { font-size: 1.5em !important; }
-h2 { font-size: 1.3em !important; }
+h1, h2 { font-size: 22px !important; }
+h3 { font-size: 19px !important; }
+h4, h5, h6 { font-size: 17px !important; }
 
 a { color: #9aa6c9 !important; text-decoration: none !important; }
 
@@ -89,7 +170,7 @@ img, svg {
 
 hr {
   border: 0 !important;
-  border-top: 1px solid #2b2e38 !important;
+  border-top: 1px solid #2b313d !important;
   margin: 2em auto !important;
   width: 40% !important;
 }
@@ -101,8 +182,19 @@ hr {
 html { scrollbar-width: none !important; }
 ::-webkit-scrollbar { width: 0 !important; height: 0 !important; display: none !important; }
 
+/* Wide screen: a touch larger, with the reading column capped at 640px. */
+@media (min-width: 768px) {
+  body {
+    font-size: 19px !important;
+    line-height: 1.8 !important;
+    padding: 12px max(24px, calc((100% - 640px) / 2)) 72px !important;
+  }
+  p { margin: 0 0 22px !important; line-height: 1.8 !important; }
+  h1, h2 { font-size: 27px !important; color: #e5e9ef !important; }
+}
+
 /* End-of-chapter block (injected by the app into each chapter). A centred
-   divider label with hairlines on either side, then a single clean card that
+   eyebrow label with hairlines on either side, then a single clean card that
    names the next chapter. The generous bottom margin gives the last line room
    to breathe above the screen edge (and any phone home indicator). */
 .chapter-end {
@@ -112,11 +204,12 @@ html { scrollbar-width: none !important; }
   display: flex !important;
   align-items: center !important;
   gap: 14px !important;
-  font-family: system-ui, -apple-system, sans-serif !important;
-  font-size: 11px !important;
-  letter-spacing: 0.16em !important;
+  font-family: var(--reader-ui) !important;
+  font-weight: 500 !important;
+  font-size: 10.5px !important;
+  letter-spacing: 0.12em !important;
   text-transform: uppercase !important;
-  color: #6a6c78 !important;
+  color: #5b636f !important;
   margin-bottom: 1.6em !important;
 }
 .chapter-end__label::before,
@@ -124,13 +217,16 @@ html { scrollbar-width: none !important; }
   content: "" !important;
   flex: 1 1 0 !important;
   height: 1px !important;
-  background: #2b2e38 !important;
+  background: #2b313d !important;
 }
 .chapter-end__label-text { white-space: nowrap !important; }
 
-/* The next-chapter card. Whole thing is one tap target. */
+/* The next-chapter card. Whole thing is one tap target; the chevron centres
+   across the full card height. */
 .chapter-end .cn-card {
-  display: block !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 12px !important;
   width: 100% !important;
   text-align: left !important;
   background: transparent !important;
@@ -138,43 +234,43 @@ html { scrollbar-width: none !important; }
   border-radius: 11px !important;
   padding: 9px 13px 10px !important;
   cursor: pointer !important;
-  font-family: system-ui, -apple-system, sans-serif !important;
+  font-family: var(--reader-ui) !important;
   -webkit-tap-highlight-color: transparent !important;
   transition: background 0.15s, border-color 0.15s !important;
 }
 .chapter-end .cn-card:hover { background: #23262f !important; border-color: #363a46 !important; }
 .chapter-end .cn-card:active { background: #202029 !important; }
-.chapter-end .cn-card__kicker {
-  font-size: 10px !important;
-  letter-spacing: 0.13em !important;
-  text-transform: uppercase !important;
-  color: #6a6c78 !important;
-  margin-bottom: 3px !important;
-}
-.chapter-end .cn-card__row {
-  display: flex !important;
-  align-items: center !important;
-  gap: 12px !important;
-}
-.chapter-end .cn-card__main {
+.chapter-end .cn-card__body {
   flex: 1 1 auto !important;
   min-width: 0 !important;
+}
+.chapter-end .cn-card__kicker {
+  font-family: var(--reader-ui) !important;
+  font-weight: 500 !important;
+  font-size: 10.5px !important;
+  letter-spacing: 0.1em !important;
+  text-transform: uppercase !important;
+  color: #6b737f !important;
+  margin-bottom: 3px !important;
+}
+.chapter-end .cn-card__main {
   display: flex !important;
   align-items: baseline !important;
   gap: 9px !important;
+  min-width: 0 !important;
 }
 .chapter-end .cn-card__num {
   flex: 0 0 auto !important;
-  font-family: "Merriweather", Georgia, serif !important;
-  font-weight: 700 !important;
-  font-size: 15px !important;
-  color: #83848f !important;
+  font-family: var(--reader-mono) !important;
+  font-weight: 400 !important;
+  font-size: 13px !important;
+  color: #79818e !important;
 }
 .chapter-end .cn-card__title {
-  font-family: "Merriweather", Georgia, serif !important;
-  font-weight: 600 !important;
-  font-size: 15px !important;
-  color: #c2c4ce !important;
+  font-family: var(--reader-serif) !important;
+  font-weight: 500 !important;
+  font-size: 17px !important;
+  color: #eef1f5 !important;
   overflow: hidden !important;
   text-overflow: ellipsis !important;
   white-space: nowrap !important;
@@ -190,7 +286,7 @@ html { scrollbar-width: none !important; }
 
 /* Shared base for the volume-boundary buttons below. */
 .chapter-end .cn-btn {
-  font-family: system-ui, -apple-system, sans-serif !important;
+  font-family: var(--reader-ui) !important;
   font-size: 14.5px !important;
   font-weight: 500 !important;
   background: transparent !important;
@@ -211,7 +307,7 @@ html { scrollbar-width: none !important; }
   text-align: center !important;
 }
 .chapter-end .vol-boundary__lead {
-  font-family: system-ui, -apple-system, sans-serif !important;
+  font-family: var(--reader-ui) !important;
   font-size: 14px !important;
   color: #83848f !important;
   line-height: 1.5 !important;
