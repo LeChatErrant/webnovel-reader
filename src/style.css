@@ -858,6 +858,11 @@ html, body {
   bottom: 0;
   transform: translateX(-50%);
   width: min(100%, 440px);
+  /* Cap the height so a tall sheet (a volume with many chapters) never fills the
+     screen — the scrim stays tappable above it and the contents scroll inside. */
+  max-height: 85vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   background: var(--surface);
   border: 1px solid var(--border-strong);
   border-bottom: 0;

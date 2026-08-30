@@ -709,12 +709,19 @@ function seriesTile(s) {
   const n = s.bookIds.length;
   const tile = h(
     "div",
-    { class: "tile tile--series", onclick: () => !selection && openInfo("series", s.id) },
+    { class: "tile tile--series" },
     stack,
     h("div", { class: "tile__title" }, s.name),
     // Meta line (11c): "N volumes" — how much is in the series, never position.
     h("div", { class: "tile__meta" }, `${n} volume${n === 1 ? "" : "s"}`)
   );
+  // Tap opens the series page; long-press raises its actions (edit, series
+  // details, delete) without a detour through that page.
+  attachLongPress(tile, {
+    canStart: () => !selection,
+    onLongPress: () => openInfoMenu(infoModel("series", s.id)),
+    onTap: () => { if (!selection) openInfo("series", s.id); },
+  });
   return tile;
 }
 
@@ -1004,8 +1011,15 @@ function renderInfo(kind, id) {
   }
   content.append(table);
 
-  // Volumes block (series only).
+  // Volumes block (series only). Tapping a row selects that volume; the chapter
+  // list at the foot of the page then shows its chapters. Selection defaults to
+  // the reading volume and survives in-page updates.
+  let selId = null;
   if (m.kind === "series") {
+    selId = m.volumes.some((v) => v.id === selectedVolumeId)
+      ? selectedVolumeId
+      : (m.currentVolume?.id || (m.volumes[0] && m.volumes[0].id) || null);
+    selectedVolumeId = selId;
     content.append(h("div", { class: "lib-label info-vollabel" }, "Volumes"));
     let offset = 0;
     for (const b of m.volumes) {
@@ -1013,7 +1027,7 @@ function renderInfo(kind, id) {
       const start = offset + 1;
       const end = offset + count;
       offset = end;
-      content.append(volumeRow(m.series, b, start, end, m.currentVolume));
+      content.append(volumeRow(m.series, b, start, end, selId));
     }
     content.append(
       h(
@@ -1025,22 +1039,28 @@ function renderInfo(kind, id) {
     );
   }
 
-  // Every info page ends in a five-chapter preview (11b). For a series it is the
-  // reading volume's chapters (absolutely numbered), and See-all opens that
-  // volume; for a standalone it is the book's own chapters.
-  const pv = previewItemsFor(m);
-  const preview = chapterPreview(pv.items, {
-    scoped: m.kind === "series",
-    onSeeAll: () => openChapters(m.kind, m.id, { volId: pv.volId }),
-  });
-  if (preview) content.append(preview);
+  // Every info page ends in a five-chapter preview (11b). For a series it tracks
+  // the selected volume (rebuilt in place on selection); for a standalone it is
+  // the book's own chapters.
+  if (m.kind === "series") {
+    const host = h("div", { class: "info-vol-preview" });
+    renderVolumePreview(m, selId, host);
+    content.append(host);
+  } else {
+    const pv = previewItemsFor(m);
+    const preview = chapterPreview(pv.items, {
+      scoped: false,
+      onSeeAll: () => openChapters(m.kind, m.id, { volId: pv.volId }),
+    });
+    if (preview) content.append(preview);
+  }
 
   root.append(content);
   root.scrollTop = 0;
 }
 
-function volumeRow(s, book, start, end, cur) {
-  const isCurrent = cur && book.id === cur.id;
+function volumeRow(s, book, start, end, selId) {
+  const isSelected = book.id === selId;
   const pct = bookPercent(book);
   const p = progressMap[book.id];
   let statusText;
@@ -1050,7 +1070,7 @@ function volumeRow(s, book, start, end, cur) {
   const title = "Vol. " + volumeNumber(s, book) + (stripVolume(displayTitle(book)) ? " · " + stripVolume(displayTitle(book)) : "");
   const row = h(
     "div",
-    { class: "vrow" + (isCurrent ? " vrow--current" : "") },
+    { class: "vrow" + (isSelected ? " vrow--current" : ""), dataset: { volId: book.id } },
     coverNode(book, "vrow__thumb"),
     h(
       "div",
@@ -1060,13 +1080,43 @@ function volumeRow(s, book, start, end, cur) {
     ),
     h("div", { class: "vrow__pct" }, pct >= 100 ? "100 %" : bookIsStarted(book) ? pct + " %" : "")
   );
-  // Tap raises the volume sheet (it does not start reading); long-press is a
-  // shortcut to delete the volume.
+  // Tap selects the volume — its chapters fill the list at the foot of the page.
+  // Long-press raises the single-volume view (continue, edit details, remove).
   attachLongPress(row, {
-    onLongPress: () => confirmDeleteVolume(book),
-    onTap: () => showVolumeSheet(s, book, start, end),
+    onLongPress: () => showVolumeSheet(s, book, start, end),
+    onTap: () => selectVolume(book.id),
   });
   return row;
+}
+
+// Move the volume selection without re-rendering the whole info page, so tapping
+// a row never jumps the scroll: shift the row highlight and rebuild the chapter
+// list below for the newly-selected volume.
+function selectVolume(volId) {
+  if (!currentInfo || currentInfo.kind !== "series") return;
+  selectedVolumeId = volId;
+  el.infoScreen
+    .querySelectorAll(".vrow")
+    .forEach((r) => r.classList.toggle("vrow--current", r.dataset.volId === volId));
+  const host = el.infoScreen.querySelector(".info-vol-preview");
+  if (host) renderVolumePreview(infoModel("series", currentInfo.id), volId, host);
+}
+
+// The five-chapter preview for one volume of a series, rendered into `host`
+// (rebuilt on each selection). Chapters are absolutely numbered; See-all opens
+// the full Chapters screen filtered to this volume.
+function renderVolumePreview(m, volId, host) {
+  host.innerHTML = "";
+  if (!m) return;
+  const vol = m.volumes.find((v) => v.id === volId) || m.currentVolume || m.volumes[0];
+  if (!vol) return;
+  const model = chaptersModel("series", m.id);
+  const items = model ? model.items.filter((it) => it.bookId === vol.id) : [];
+  const preview = chapterPreview(items, {
+    scoped: true,
+    onSeeAll: () => openChapters("series", m.id, { volId: vol.id }),
+  });
+  if (preview) host.append(preview);
 }
 
 function addVolumeToSeries(seriesId) {
@@ -1139,7 +1189,7 @@ function openEditorShell(title) {
     h(
       "div",
       { class: "editor-bar" },
-      h("button", { class: "sbar__icon", "aria-label": "Cancel", onclick: closeEditor }, svg(ICON.close)),
+      h("button", { class: "sbar__icon", "aria-label": "Cancel", onclick: () => closeOverlay() }, svg(ICON.close)),
       h("div", { class: "editor-bar__title" }, title),
       saveBtn
     )
@@ -1147,6 +1197,7 @@ function openEditorShell(title) {
   const body = h("div", { class: "editor-body" });
   el.editor.append(body);
   el.editor.hidden = false;
+  armOverlay(closeEditor);
   return { body, saveBtn };
 }
 
@@ -1207,8 +1258,7 @@ function showEditDetails(m) {
       else delete b.overrides.subjects;
       await dbPut("books", b);
     }
-    closeEditor();
-    renderInfo(m.kind, m.id);
+    closeOverlay(() => renderInfo(m.kind, m.id));
   };
 }
 
@@ -1311,8 +1361,7 @@ function showSeriesDetails(s) {
       await Promise.all(vols.map((b) => dbPut("books", b)));
     }
     await dbPut("series", s);
-    closeEditor();
-    renderInfo("series", s.id);
+    closeOverlay(() => renderInfo("series", s.id));
   };
 }
 
@@ -1377,8 +1426,8 @@ function showVolumeSheet(s, book, start, end) {
 
   // Volume overflow menu (⋯) and the Edit-details editor both act on this
   // volume as if it were a standalone book.
-  const editVolume = () => { hideVolumeSheet(); showEditDetails(infoModel("book", book.id)); };
-  const removeVolume = () => { hideVolumeSheet(); confirmDeleteVolume(book); };
+  const editVolume = () => closeOverlay(() => showEditDetails(infoModel("book", book.id)));
+  const removeVolume = () => closeOverlay(() => confirmDeleteVolume(book));
 
   const card = el.volumeCard;
   card.innerHTML = "";
@@ -1401,19 +1450,7 @@ function showVolumeSheet(s, book, start, end) {
     h(
       "div",
       { class: "vsheet__actions" },
-      h("button", { class: "pill-btn vsheet__continue", onclick: () => { hideVolumeSheet(); openBook(book.id); } }, continueLabel),
-      h(
-        "button",
-        {
-          class: "vsheet__more",
-          "aria-label": "More",
-          onclick: () => showActionSheet([
-            { label: "Edit details", onClick: editVolume },
-            { label: "Remove from series", danger: true, onClick: removeVolume },
-          ]),
-        },
-        svg(ICON.more)
-      )
+      h("button", { class: "pill-btn vsheet__continue", onclick: () => closeOverlay(() => openBook(book.id)) }, continueLabel)
     ),
     h(
       "div",
@@ -1434,11 +1471,12 @@ function showVolumeSheet(s, book, start, end) {
   const items = model ? model.items.filter((it) => it.bookId === book.id) : [];
   const preview = chapterPreview(items, {
     scoped: true,
-    onSeeAll: () => { hideVolumeSheet(); openChapters("series", s.id, { volId: book.id }); },
+    onSeeAll: () => closeOverlay(() => openChapters("series", s.id, { volId: book.id })),
   });
   if (preview) card.append(preview);
 
   el.volumeSheet.hidden = false;
+  armOverlay(hideVolumeSheet);
 }
 
 // =========================================================================
@@ -1872,14 +1910,15 @@ function showActionSheet(actions) {
         "button",
         {
           class: "action-item" + (a.danger ? " action-item--danger" : ""),
-          onclick: () => { hideActionSheet(); a.onClick(); },
+          onclick: () => closeOverlay(a.onClick),
         },
         a.label
       )
     );
   }
-  card.append(h("button", { class: "action-item action-item--cancel", onclick: hideActionSheet }, "Cancel"));
+  card.append(h("button", { class: "action-item action-item--cancel", onclick: () => closeOverlay() }, "Cancel"));
   el.actionSheet.hidden = false;
+  armOverlay(hideActionSheet);
 }
 
 // =========================================================================
@@ -2066,21 +2105,27 @@ async function confirmDeleteVolume(book) {
 // =========================================================================
 // Sheets — suggestion (duplicate), name prompt.
 // =========================================================================
+// These prompts resolve a value. The hide fn (run when the layer is torn down,
+// whether by a button, the scrim, or the phone's Back) resolves with whatever
+// `result` holds at that point — the positive buttons set it before dismissing,
+// so a plain dismiss (Back/scrim) always resolves the negative default.
 function showSuggestSheet(name, count) {
   return new Promise((resolve) => {
     el.suggestBody.textContent =
       count > 2
         ? `${count} books share the same title and author. Group them as “${name}”?`
         : `Same title and author in the .epub metadata. Group them as “${name}”?`;
-    el.suggestSheet.hidden = false;
-    const done = (val) => {
+    let result = false;
+    const hide = () => {
       el.suggestSheet.hidden = true;
       el.suggestGroup.onclick = el.suggestKeep.onclick = el.suggestScrim.onclick = null;
-      resolve(val);
+      resolve(result);
     };
-    el.suggestGroup.onclick = () => done(true);
-    el.suggestKeep.onclick = () => done(false);
-    el.suggestScrim.onclick = () => done(false);
+    el.suggestSheet.hidden = false;
+    armOverlay(hide);
+    el.suggestGroup.onclick = () => { result = true; closeOverlay(); };
+    el.suggestKeep.onclick = () => closeOverlay();
+    el.suggestScrim.onclick = () => closeOverlay();
   });
 }
 function showConfirmSheet(title, body, confirmLabel) {
@@ -2088,15 +2133,17 @@ function showConfirmSheet(title, body, confirmLabel) {
     el.confirmTitle.textContent = title;
     el.confirmBody.textContent = body;
     el.confirmOk.textContent = confirmLabel || "Delete";
-    el.confirmSheet.hidden = false;
-    const done = (val) => {
+    let result = false;
+    const hide = () => {
       el.confirmSheet.hidden = true;
       el.confirmOk.onclick = el.confirmCancel.onclick = el.confirmScrim.onclick = null;
-      resolve(val);
+      resolve(result);
     };
-    el.confirmOk.onclick = () => done(true);
-    el.confirmCancel.onclick = () => done(false);
-    el.confirmScrim.onclick = () => done(false);
+    el.confirmSheet.hidden = false;
+    armOverlay(hide);
+    el.confirmOk.onclick = () => { result = true; closeOverlay(); };
+    el.confirmCancel.onclick = () => closeOverlay();
+    el.confirmScrim.onclick = () => closeOverlay();
   });
 }
 function showNameSheet(title, prefill, confirmLabel) {
@@ -2104,19 +2151,22 @@ function showNameSheet(title, prefill, confirmLabel) {
     el.nameTitle.textContent = title;
     el.nameConfirm.textContent = confirmLabel || "Save";
     el.nameInput.value = prefill || "";
-    el.nameSheet.hidden = false;
-    setTimeout(() => el.nameInput.focus(), 30);
-    const done = (val) => {
+    let result = null;
+    const hide = () => {
       el.nameSheet.hidden = true;
       el.nameConfirm.onclick = el.nameCancel.onclick = el.nameScrim.onclick = el.nameInput.onkeydown = null;
-      resolve(val);
+      resolve(result);
     };
-    el.nameConfirm.onclick = () => done(el.nameInput.value.trim() || prefill);
-    el.nameCancel.onclick = () => done(null);
-    el.nameScrim.onclick = () => done(null);
+    el.nameSheet.hidden = false;
+    armOverlay(hide);
+    setTimeout(() => el.nameInput.focus(), 30);
+    const confirm = () => { result = el.nameInput.value.trim() || prefill; closeOverlay(); };
+    el.nameConfirm.onclick = confirm;
+    el.nameCancel.onclick = () => closeOverlay();
+    el.nameScrim.onclick = () => closeOverlay();
     el.nameInput.onkeydown = (e) => {
-      if (e.key === "Enter") done(el.nameInput.value.trim() || prefill);
-      if (e.key === "Escape") done(null);
+      if (e.key === "Enter") confirm();
+      if (e.key === "Escape") closeOverlay();
     };
   });
 }
@@ -2629,6 +2679,10 @@ function renderCurrentRoute() {
 }
 
 let currentInfo = null; // { kind: "book" | "series", id } when on the info route
+// On a series info page, which volume's chapters the bottom list shows. Tapping a
+// volume row selects it; navigating to a series resets it so it defaults to the
+// reading volume. Null → default (the reading volume / first).
+let selectedVolumeId = null;
 
 // Apply a route state (without pushing history).
 async function applyState(state) {
@@ -2645,6 +2699,7 @@ async function applyState(state) {
     }
   } else if (s.route === "info" && s.id) {
     currentInfo = { kind: s.kind || "series", id: s.id };
+    selectedVolumeId = null;
     setRouteChrome("info");
     renderInfo(currentInfo.kind, currentInfo.id);
   } else if (s.route === "chapters" && s.id) {
@@ -2665,6 +2720,7 @@ function go(state, push = true) {
     setRouteChrome("reader");
   } else if (state.route === "info" && state.id) {
     currentInfo = { kind: state.kind || "series", id: state.id };
+    selectedVolumeId = null;
     setRouteChrome("info");
     renderInfo(currentInfo.kind, currentInfo.id);
   } else if (state.route === "chapters" && state.id) {
@@ -2695,6 +2751,37 @@ function openSeries(id) {
 // This makes Back predictable no matter the path in (a book opened straight into
 // the reader from the Continue card still backs out to its info page).
 let activeState = { route: "library" };
+
+// -------------------------------------------------------------------------
+// Overlays vs. Back. Sheets and the editor are dismissable layers that sit on
+// top of a route (a volume sheet, the ⋯ action sheet, a confirm/name prompt,
+// the details editor). The phone's Back gesture must close the *topmost* such
+// layer before it ever changes route — otherwise Back navigated the page out
+// from under an open sheet.
+//
+// Every overlay, when shown, pushes one history entry (`_overlay`) and registers
+// a DOM-hide fn on `overlayStack`. Both Back and every in-app dismissal funnel
+// through the same `popstate` unwind: `closeOverlay(after)` calls `history.back()`
+// (which the browser turns into a popstate), and the handler pops one layer, runs
+// its hide fn, then runs `after` (used to open the next screen/sheet). Pushing on
+// open guarantees Back always has a layer entry to pop even at the library root.
+const overlayStack = []; // DOM-hide fns, innermost last
+let pendingAfter = null; // ran once, inside the popstate that closes a layer
+function armOverlay(hide) {
+  overlayStack.push(hide);
+  history.pushState({ ...activeState, _overlay: overlayStack.length }, "");
+}
+// Close the top overlay (from a button, the scrim, Escape, or a chained action).
+// `after` runs after the layer is torn down — navigate or raise the next sheet
+// there so it happens inside the single popstate, never racing the unwind.
+function closeOverlay(after = null) {
+  if (!overlayStack.length) {
+    if (after) after();
+    return;
+  }
+  pendingAfter = after;
+  history.back();
+}
 function bookInfoParent(bookId) {
   const b = bookById(bookId);
   if (b?.seriesId && seriesById(b.seriesId)) return { route: "info", kind: "series", id: b.seriesId };
@@ -2709,6 +2796,17 @@ function structuralParent(state) {
   return null; // library / unknown — the root; let Back leave the app
 }
 window.addEventListener("popstate", (e) => {
+  // An overlay is open → Back (or an in-app dismissal) closes just that layer.
+  // The browser already consumed its `_overlay` entry, so we only tear down the
+  // DOM and run any chained action; the route underneath is untouched.
+  if (overlayStack.length) {
+    const hide = overlayStack.pop();
+    hide();
+    const after = pendingAfter;
+    pendingAfter = null;
+    if (after) after();
+    return;
+  }
   const parent = structuralParent(activeState);
   if (parent) {
     // Redirect Back to the structural parent and keep the app in control of the
@@ -2744,6 +2842,7 @@ async function handleInstallClick() {
     return;
   }
   el.installSheet.hidden = false;
+  armOverlay(() => { el.installSheet.hidden = true; });
 }
 window.addEventListener("beforeinstallprompt", (e) => {
   e.preventDefault();
@@ -3104,12 +3203,12 @@ function wireEvents() {
   el.selectGroup.addEventListener("click", confirmGrouping);
   el.selectDelete.addEventListener("click", confirmDeleteSelection);
 
-  el.volumeScrim.addEventListener("click", hideVolumeSheet);
-  el.actionScrim.addEventListener("click", hideActionSheet);
+  el.volumeScrim.addEventListener("click", () => closeOverlay());
+  el.actionScrim.addEventListener("click", () => closeOverlay());
 
   el.installNote.addEventListener("click", handleInstallClick);
-  el.installScrim.addEventListener("click", () => (el.installSheet.hidden = true));
-  el.installSheetClose.addEventListener("click", () => (el.installSheet.hidden = true));
+  el.installScrim.addEventListener("click", () => closeOverlay());
+  el.installSheetClose.addEventListener("click", () => closeOverlay());
 
   if (el.appVersion) el.appVersion.textContent = APP_VERSION;
   el.checkUpdate?.addEventListener("click", checkForUpdatesManually);
@@ -3123,11 +3222,8 @@ function wireEvents() {
 
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") {
-      if (!el.editor.hidden) return closeEditor();
-      if (!el.actionSheet.hidden) return hideActionSheet();
-      if (!el.volumeSheet.hidden) return hideVolumeSheet();
-      if (!el.confirmSheet.hidden) return el.confirmCancel.click();
-      if (!el.installSheet.hidden) return (el.installSheet.hidden = true);
+      // Any open overlay (sheet or editor) unwinds through the same path Back uses.
+      if (overlayStack.length) return closeOverlay();
       if (selection) return exitSelection();
       if (el.drawer.classList.contains("open")) return closeDrawer();
     }
