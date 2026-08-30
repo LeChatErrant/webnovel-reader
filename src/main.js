@@ -2264,12 +2264,37 @@ let chapterEntryBaseline = { href: null, pct: 0 };
 // `relocated` while scrolling, and once more when the app is backgrounded so
 // the freshest position survives. Pure persistence — no DOM/view updates, so it
 // is safe to run while the reader is hidden.
+// After a resume display() settles, correct the chapter view to the exact saved
+// pixel offset. epub.js positions to the CFI's top-of-viewport word, which can
+// collapse to a paragraph's start and leave you "a bit before" where you were;
+// reapplying the raw scrollTop removes that drift. Safe because a resume only
+// ever restores within the same chapter on the same device (stable layout).
+function restoreScrollAfter(shown, scrollTop) {
+  Promise.resolve(shown)
+    .then(() => {
+      requestAnimationFrame(() => {
+        const c = rendition?.manager?.container;
+        if (!c) return;
+        const max = Math.max(0, c.scrollHeight - c.clientHeight);
+        const y = Math.min(scrollTop, max);
+        if (y > 0) c.scrollTop = y;
+      });
+    })
+    .catch(() => {});
+}
+
 function saveReadingLocation(location) {
   const lib = currentBook;
   if (!lib || !location?.start) return;
   const idx = typeof location.start.index === "number" ? location.start.index : 0;
   const href = baseHref(location.start.href || currentHref);
   const prev = progressMap[lib.id];
+  // Exact pixel scroll within the current chapter's view. The CFI alone snaps to
+  // the top-of-viewport word (and can collapse to a paragraph's start), which
+  // lands the resume "a bit before" where you were; pairing it with the raw
+  // scrollTop lets restore correct to the exact spot (same device/font, no
+  // images → the offset is stable between save and restore).
+  const scrollTop = Math.round(rendition?.manager?.container?.scrollTop || 0);
 
   // Progress within the chapter you're on (0–100). Not every layout exposes it;
   // when it's missing we keep whatever we already had for this chapter.
@@ -2299,6 +2324,9 @@ function saveReadingLocation(location) {
       chapters[href] = {
         pct,
         cfi: advanced && location.start.cfi ? location.start.cfi : base.cfi || location.start.cfi || null,
+        // Keep scrollTop paired with the cfi it was captured at: refresh both
+        // when advancing, keep both when scrolled back.
+        scrollTop: advanced ? scrollTop : base.scrollTop ?? scrollTop,
         done,
       };
       // Chapter skipping: finishing a chapter completes every earlier one too.
@@ -2315,6 +2343,7 @@ function saveReadingLocation(location) {
   const rec = {
     bookId: lib.id,
     cfi: location.start.cfi || null, // book-level resume: where you are right now
+    scrollTop, // exact in-chapter offset, paired with cfi (see above)
     chapterIndex: idx,
     chapterLabel: chapterLabelFor(href) || prev?.chapterLabel || "",
     chapters,
@@ -2411,8 +2440,14 @@ async function renderReader(lib, startHref = null) {
   if (!resume && p?.chapterLabel) resume = flatToc.find((e) => e.label === p.chapterLabel)?.href;
   // A chapter tapped in the list/drawer opens at its top and offers the
   // per-chapter resume chip; the book-level "Continue" restores the exact CFI.
-  if (startHref) displayChapterTop(startHref);
-  else rendition.display(resume || flatToc[0]?.href || undefined);
+  if (startHref) {
+    displayChapterTop(startHref);
+  } else {
+    const shown = rendition.display(resume || flatToc[0]?.href || undefined);
+    // Only refine when we actually restored the book-level CFI (not a fallback
+    // to a chapter href or chapter 1) and have a saved offset for it.
+    if (resume && resume === p?.cfi && p?.scrollTop > 0) restoreScrollAfter(shown, p.scrollTop);
+  }
 
   // Refine the chapter list once the live navigation resolves (accurate hrefs).
   book.loaded.navigation.then((nav) => {
@@ -2604,7 +2639,10 @@ function maybeShowResumeChip(href) {
     {
       class: "resume-chip__go",
       onclick: () => {
-        if (rendition && st.cfi) rendition.display(st.cfi);
+        if (rendition && st.cfi) {
+          const shown = rendition.display(st.cfi);
+          if (st.scrollTop > 0) restoreScrollAfter(shown, st.scrollTop);
+        }
         hideResumeChip();
       },
     },
