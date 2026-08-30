@@ -1100,6 +1100,7 @@ function renderInfo(kind, id) {
     const pv = previewItemsFor(m);
     const preview = chapterPreview(pv.items, {
       scoped: false,
+      anchorAbs: pv.anchorAbs,
       onSeeAll: () => openChapters(m.kind, m.id, { volId: pv.volId }),
     });
     if (preview) content.append(preview);
@@ -1164,6 +1165,7 @@ function renderVolumePreview(m, volId, host) {
   const items = model ? model.items.filter((it) => it.bookId === vol.id) : [];
   const preview = chapterPreview(items, {
     scoped: true,
+    anchorAbs: model ? model.scrollAnchorAbs : null,
     onSeeAll: () => openChapters("series", m.id, { volId: vol.id }),
   });
   if (preview) host.append(preview);
@@ -1521,6 +1523,7 @@ function showVolumeSheet(s, book, start, end) {
   const items = model ? model.items.filter((it) => it.bookId === book.id) : [];
   const preview = chapterPreview(items, {
     scoped: true,
+    anchorAbs: model ? model.scrollAnchorAbs : null,
     onSeeAll: () => closeOverlay(() => openChapters("series", s.id, { volId: book.id })),
   });
   if (preview) card.append(preview);
@@ -1642,11 +1645,14 @@ function openChapters(kind, id, { volId = null } = {}) {
 // -------------------------------------------------------------------------
 
 // The five rows to show: an unopened book shows chapters 1–5; a book in progress
-// shows two before the current chapter, the current one, and two after (clamped
-// to the ends). Five or fewer chapters show them all.
-function previewWindow(items) {
+// shows two before the anchor chapter, the anchor, and two after (clamped to the
+// ends). Five or fewer chapters show them all. `anchorAbs` is the row to centre on
+// — the current (resume) chapter if there is one, else the last-read chapter, so a
+// finished book previews where you left off instead of falling back to 1–5.
+function previewWindow(items, anchorAbs) {
   if (items.length <= 5) return items;
-  const cur = items.findIndex((it) => it.state === "current");
+  let cur = anchorAbs != null ? items.findIndex((it) => it.absNum === anchorAbs) : -1;
+  if (cur < 0) cur = items.findIndex((it) => it.state === "current");
   if (cur < 0) return items.slice(0, 5);
   const start = Math.max(0, Math.min(cur - 2, items.length - 5));
   return items.slice(start, start + 5);
@@ -1681,7 +1687,7 @@ function cprevRow(it) {
 // Build a preview section from a chaptersModel-style item list for one book (or
 // the reading volume of a series). `scoped` switches the right-hand count to
 // "N in this volume"; `onSeeAll` pushes the full Chapters screen.
-function chapterPreview(items, { scoped = false, onSeeAll } = {}) {
+function chapterPreview(items, { scoped = false, onSeeAll, anchorAbs = null } = {}) {
   if (!items || !items.length) return null;
   const total = items.length;
   const cur = items.find((it) => it.state === "current");
@@ -1700,7 +1706,7 @@ function chapterPreview(items, { scoped = false, onSeeAll } = {}) {
     )
   );
   const rows = h("div", { class: "cprev__rows" });
-  for (const it of previewWindow(items)) rows.append(cprevRow(it));
+  for (const it of previewWindow(items, anchorAbs)) rows.append(cprevRow(it));
   sec.append(rows);
   if (total > 5) {
     sec.append(
@@ -1720,12 +1726,16 @@ function chapterPreview(items, { scoped = false, onSeeAll } = {}) {
 function previewItemsFor(m) {
   if (m.kind === "series") {
     const vol = m.currentVolume;
-    if (!vol) return { items: [], volId: null };
+    if (!vol) return { items: [], volId: null, anchorAbs: null };
     const model = chaptersModel("series", m.id);
-    return { items: model ? model.items.filter((it) => it.bookId === vol.id) : [], volId: vol.id };
+    return {
+      items: model ? model.items.filter((it) => it.bookId === vol.id) : [],
+      volId: vol.id,
+      anchorAbs: model ? model.scrollAnchorAbs : null,
+    };
   }
   const model = chaptersModel("book", m.id);
-  return { items: model ? model.items : [], volId: null };
+  return { items: model ? model.items : [], volId: null, anchorAbs: model ? model.scrollAnchorAbs : null };
 }
 
 // "Shadow Slave · vol. 2" — the book, then the active volume filter.
