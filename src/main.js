@@ -8,15 +8,6 @@ import "./style.css";
 // unstyled (dark-on-dark) text online, and permanently dark text offline
 // (that in-iframe request never hit the service-worker precache).
 import readerThemeCss from "./reader-theme.css?raw";
-// The @font-face src paths in that file are root-absolute (/fonts/...), which
-// 404 whenever the app is served from a subpath (e.g. GitHub Pages serves it
-// under /webnovel-reader/), silently dropping Merriweather to a Georgia
-// fallback. Rewrite them to an absolute URL under the app's own base so the
-// fonts load — online, and offline too since the files are precached.
-const READER_THEME_CSS = readerThemeCss.replaceAll(
-  'url("/fonts/',
-  'url("' + new URL("fonts/", document.baseURI).href,
-);
 
 // =========================================================================
 // Webnovel reader — a private, offline, on-device library.
@@ -2589,7 +2580,7 @@ function injectReaderTheme(contents) {
   if (!doc || doc.getElementById("webnovel-theme")) return;
   const style = doc.createElement("style");
   style.id = "webnovel-theme";
-  style.textContent = READER_THEME_CSS;
+  style.textContent = readerThemeCss;
   (doc.head || doc.documentElement).appendChild(style);
 }
 

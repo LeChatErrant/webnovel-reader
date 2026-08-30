@@ -3,9 +3,8 @@
    KOReader setup exactly:
      background #1f2129 · text #83848f · headings #a9aab3 · links #9aa6c9
      Merriweather 18px / line-height 1.8 · ragged-left · no indent · spaced.
-   Font paths are written as /fonts/... here but rewritten at load time (see
-   READER_THEME_CSS in main.js) to an absolute URL under the app's own base, so
-   they resolve correctly even when the app is served from a subpath. */
+   Font paths are absolute (/fonts/...) so they resolve against the site
+   origin, not the epub's internal base URL. */
 
 @font-face {
   font-family: "Merriweather";
