@@ -1,6 +1,22 @@
 import ePub from "epubjs";
 import { registerSW } from "virtual:pwa-register";
 import "./style.css";
+// The reader theme is inlined into the JS bundle (not fetched per chapter) and
+// injected as a <style> element into each chapter document via a content hook.
+// Registering it as an external URL made epub.js drop a <link> into every
+// chapter iframe, fetched afresh on each chapter change -- a visible flash of
+// unstyled (dark-on-dark) text online, and permanently dark text offline
+// (that in-iframe request never hit the service-worker precache).
+import readerThemeCss from "./reader-theme.css?raw";
+// The @font-face src paths in that file are root-absolute (/fonts/...), which
+// 404 whenever the app is served from a subpath (e.g. GitHub Pages serves it
+// under /webnovel-reader/), silently dropping Merriweather to a Georgia
+// fallback. Rewrite them to an absolute URL under the app's own base so the
+// fonts load — online, and offline too since the files are precached.
+const READER_THEME_CSS = readerThemeCss.replaceAll(
+  'url("/fonts/',
+  'url("' + new URL("fonts/", document.baseURI).href,
+);
 
 // =========================================================================
 // Webnovel reader — a private, offline, on-device library.
@@ -2312,13 +2328,12 @@ async function renderReader(lib, startHref = null) {
     spread: "none",
     allowScriptedContent: false,
   });
-  // The full reading theme is an external stylesheet, fetched per view — which
-  // leaves a brief white flash on each chapter change while it loads. Inject
-  // the critical dark background inline (applied the instant the view is
-  // created) so the flash never shows.
+  // Critical dark background as a rules theme so it's applied the instant the
+  // view is created; the full reading theme is injected inline per chapter by
+  // injectReaderTheme (content hook, before the view is shown) so there is no
+  // per-chapter fetch — no flash, and it works fully offline.
   rendition.themes.default({ "html, body": { background: "#1f2129 !important" } });
-  rendition.themes.register("webnovel", "./reader-theme.css");
-  rendition.themes.select("webnovel");
+  rendition.hooks.content.register(injectReaderTheme);
   rendition.hooks.content.register(injectChapterNav);
 
   el.btnPrev.disabled = false;
@@ -2565,6 +2580,19 @@ function updateChapterTitle(href) {
 // End-of-chapter navigation, injected into each chapter document. At the end
 // of a volume that has a next volume in the library, this becomes the
 // "ask me at the boundary" card rather than a silent jump.
+// Inject the reading theme as an inline <style> into each chapter document.
+// Runs on the content hook, which fires after the chapter is written but before
+// the view is displayed/shown, so the text paints already styled (no flash) and
+// with no network dependency (works offline).
+function injectReaderTheme(contents) {
+  const doc = contents?.document;
+  if (!doc || doc.getElementById("webnovel-theme")) return;
+  const style = doc.createElement("style");
+  style.id = "webnovel-theme";
+  style.textContent = READER_THEME_CSS;
+  (doc.head || doc.documentElement).appendChild(style);
+}
+
 function injectChapterNav(contents) {
   const doc = contents.document;
   if (!doc?.body || doc.querySelector(".chapter-end")) return;
