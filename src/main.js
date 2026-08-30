@@ -84,6 +84,7 @@ async function loadState() {
   books = bookRows || [];
   series = seriesRows || [];
   for (const p of progRows || []) progressMap[p.bookId] = p;
+  reconcilePendingProgress();
   if (savedUi) ui = { ...ui, ...savedUi };
   await migrateProgressRecords();
 }
@@ -91,6 +92,48 @@ const saveUi = () => kvSet("ui", ui);
 async function putProgress(p) {
   progressMap[p.bookId] = p;
   await dbPut("progress", p);
+}
+
+// Crash-durability for the reading position. IndexedDB writes are async, so a
+// position saved the instant the app is backgrounded (screen lock / app-switch)
+// can be dropped if the OS suspends or kills the page before the transaction
+// commits — you then resume from an earlier, already-committed scroll save.
+// localStorage.setItem is synchronous and commits before the event handler
+// returns, so on backgrounding we mirror the freshest record there too;
+// reconcilePendingProgress folds any mirror newer than the DB back in at launch.
+const PENDING_POS_PREFIX = "pendingpos:";
+function stashPendingProgress(p) {
+  try {
+    localStorage.setItem(PENDING_POS_PREFIX + p.bookId, JSON.stringify(p));
+  } catch (_) {
+    // localStorage disabled (private mode) or over quota — the async IndexedDB
+    // write stays the primary path, so there is nothing to fall back to here.
+  }
+}
+function reconcilePendingProgress() {
+  let keys;
+  try {
+    keys = Object.keys(localStorage).filter((k) => k.startsWith(PENDING_POS_PREFIX));
+  } catch (_) {
+    return;
+  }
+  for (const k of keys) {
+    let p = null;
+    try {
+      p = JSON.parse(localStorage.getItem(k));
+    } catch (_) {
+      /* corrupt entry — drop it below */
+    }
+    // Apply only when the stash is genuinely newer than what the DB restored,
+    // so a stale mirror can never rewind a position the DB already advanced.
+    if (p && p.bookId && (p.updatedAt || 0) > (progressMap[p.bookId]?.updatedAt || 0)) {
+      progressMap[p.bookId] = p;
+      dbPut("progress", p); // foreground write at launch — reliably commits
+    }
+    try {
+      localStorage.removeItem(k);
+    } catch (_) {}
+  }
 }
 // One-time upgrade for progress written before per-chapter tracking: synthesize
 // a `chapters` map from the old furthest-opened index + within-chapter %.
@@ -2248,7 +2291,7 @@ function saveReadingLocation(location) {
   const nDone = readableHrefs.filter((h) => chapters[h]?.done).length;
   const finished = prev?.finished || (total > 0 && nDone >= total);
 
-  putProgress({
+  const rec = {
     bookId: lib.id,
     cfi: location.start.cfi || null, // book-level resume: where you are right now
     chapterIndex: idx,
@@ -2256,9 +2299,11 @@ function saveReadingLocation(location) {
     chapters,
     finished,
     updatedAt: Date.now(),
-  });
+  };
+  putProgress(rec);
   ui.lastReadBookId = lib.id;
   saveUi();
+  return rec;
 }
 
 // Flush the reading position when the app is backgrounded (phone lock or
@@ -2272,7 +2317,12 @@ function flushReadingPosition() {
     let loc = rendition.currentLocation();
     if (loc && typeof loc.then === "function") loc = null; // async manager; skip
     if (!loc?.start) loc = rendition.location; // fall back to last known
-    if (loc?.start) saveReadingLocation(loc);
+    if (loc?.start) {
+      // Mirror the freshest record to localStorage synchronously so it survives
+      // an OS suspend that could drop the async IndexedDB write (see above).
+      const rec = saveReadingLocation(loc);
+      if (rec) stashPendingProgress(rec);
+    }
   } catch (err) {
     console.warn("Position flush failed:", err);
   }
