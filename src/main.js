@@ -2274,21 +2274,78 @@ let chapterEntryBaseline = { href: null, pct: 0 };
 // `relocated` while scrolling, and once more when the app is backgrounded so
 // the freshest position survives. Pure persistence — no DOM/view updates, so it
 // is safe to run while the reader is hidden.
+// The content iframe's document (the epub chapter). Used to wait for its web
+// font to load before trusting its layout height. Version-independent: read the
+// iframe straight off the scroll container rather than via getContents().
+function readerContentDoc() {
+  try {
+    return rendition?.manager?.container?.querySelector("iframe")?.contentDocument || null;
+  } catch (_) {
+    return null;
+  }
+}
+
 // After a resume display() settles, correct the chapter view to the exact saved
 // pixel offset. epub.js positions to the CFI's top-of-viewport word, which can
 // collapse to a paragraph's start and leave you "a bit before" where you were;
 // reapplying the raw scrollTop removes that drift. Safe because a resume only
 // ever restores within the same chapter on the same device (stable layout).
+//
+// Timing is the subtle part. The book face (Spectral) is `font-display: swap`,
+// so a fresh load — which is exactly what a *long* phone-lock forces, once the
+// OS discards the suspended page — first lays the chapter out in the fallback
+// serif, then reflows when Spectral swaps in. If we set scrollTop during that
+// fallback layout we clamp it against a shorter scrollHeight; the later reflow
+// then leaves the resume a screen *above* the saved spot (the "after a long
+// lock it goes back before where I was" bug). So we re-apply once the iframe's
+// fonts have actually loaded and the text has reflowed to its final height, and
+// again over a short window as insurance — bailing the moment the reader scrolls
+// so an active reader is never yanked. A short lock keeps the page in memory and
+// never re-renders, so none of this runs then.
 function restoreScrollAfter(shown, scrollTop) {
   Promise.resolve(shown)
     .then(() => {
-      requestAnimationFrame(() => {
-        const c = rendition?.manager?.container;
-        if (!c) return;
+      const c = rendition?.manager?.container;
+      if (!c) return;
+
+      let interacted = false;
+      const markInteracted = () => {
+        interacted = true;
+      };
+      const targets = [c, readerContentDoc()].filter(Boolean);
+      for (const t of targets) {
+        t.addEventListener("wheel", markInteracted, { passive: true });
+        t.addEventListener("touchstart", markInteracted, { passive: true });
+        t.addEventListener("keydown", markInteracted, { passive: true });
+      }
+      const cleanup = () => {
+        for (const t of targets) {
+          t.removeEventListener("wheel", markInteracted);
+          t.removeEventListener("touchstart", markInteracted);
+          t.removeEventListener("keydown", markInteracted);
+        }
+      };
+
+      const apply = () => {
+        if (interacted || !c.isConnected) return;
         const max = Math.max(0, c.scrollHeight - c.clientHeight);
         const y = Math.min(scrollTop, max);
         if (y > 0) c.scrollTop = y;
-      });
+      };
+
+      // Best-effort now (covers a font already cached and applied), then again
+      // once the chapter's web font has loaded and reflowed to its final height.
+      requestAnimationFrame(apply);
+      const doc = readerContentDoc();
+      if (doc?.fonts?.ready) {
+        doc.fonts.ready.then(() => requestAnimationFrame(apply)).catch(() => {});
+      }
+      // Belt-and-braces: fonts.ready can resolve a frame before the reflow
+      // paints, and some engines never expose it on the iframe. Re-apply across
+      // a short window, then stop listening.
+      setTimeout(apply, 150);
+      setTimeout(apply, 400);
+      setTimeout(cleanup, 600);
     })
     .catch(() => {});
 }
