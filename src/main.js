@@ -792,11 +792,11 @@ function importTile() {
   return tile;
 }
 
-// Tap runs `onTap`; a long-press reseeds the demo library. Shared by the Import
-// tile and the empty-state Import button so seeding is reachable even with an
-// empty library.
+// Tap runs `onTap`; a long-press opens the hidden dev menu (seed / clear the
+// demo library). Shared by the Import tile and the empty-state Import button so
+// it's reachable even with an empty library.
 function attachSeedGesture(node, onTap) {
-  attachLongPress(node, { canStart: () => !selection, onLongPress: confirmAndSeed, onTap });
+  attachLongPress(node, { canStart: () => !selection, onLongPress: openDevSeedMenu, onTap });
 }
 
 function emptyState() {
@@ -3257,19 +3257,36 @@ function pickFiles() {
 }
 
 // -------------------------------------------------------------------------
-// Dev seeding — a hidden reset that fills the library with a fixed set of
+// Dev seeding — a hidden menu that fills the library with a fixed set of
 // real, public-domain books covering every design case (with/without cover,
-// started/unstarted, loose volumes, and shelves). Triggered by a long-press on
-// the Import tile (or the empty-state Import button). It re-seeds the demo set:
-// it clears only the books and shelves it previously seeded (tagged with
-// `seeded: true`), leaving any real imported books untouched, so calling it
-// repeatedly never duplicates the demo set and never destroys real content.
+// started/unstarted, loose volumes, and shelves), or clears them again to get
+// back to a blank environment. Triggered by a long-press on the Import tile (or
+// the empty-state Import button). Both actions touch only content tagged
+// `seeded: true`, leaving any real imported books untouched — so seeding never
+// duplicates the demo set and clearing never destroys real content.
 //
 // The books live in public/seed/ with a manifest describing how to arrange
 // them; see scripts/fetch-seed.mjs. They are excluded from the PWA precache, so
 // they never ship to real users — only a deliberate long-press fetches them.
 // -------------------------------------------------------------------------
 let seeding = false;
+
+// Raise the seed/clear chooser. "Clear" only appears when there is seeded
+// content to remove, so the menu reads as empty-library "seed" vs seeded-library
+// "seed or clear".
+function openDevSeedMenu() {
+  if (seeding) return;
+  const seededCount = books.filter((b) => b.seeded).length;
+  const actions = [{ label: seededCount ? "Re-seed demo library" : "Seed demo library", onClick: confirmAndSeed }];
+  if (seededCount) {
+    actions.push({
+      label: `Clear ${seededCount} seeded book${seededCount === 1 ? "" : "s"}`,
+      danger: true,
+      onClick: confirmAndClearSeeded,
+    });
+  }
+  showActionSheet(actions);
+}
 
 async function confirmAndSeed() {
   if (seeding) return;
@@ -3285,6 +3302,29 @@ async function confirmAndSeed() {
   } catch (err) {
     console.warn("Seeding failed", err);
     alert("Seeding failed: " + (err?.message || err));
+  } finally {
+    seeding = false;
+  }
+}
+
+// Remove every seeded demo book/shelf, leaving real imported content in place.
+async function confirmAndClearSeeded() {
+  if (seeding) return;
+  const seededCount = books.filter((b) => b.seeded).length;
+  if (!seededCount) return;
+  const ok = await showConfirmSheet(
+    "Clear seeded books",
+    `Remove the ${seededCount} demo book${seededCount === 1 ? "" : "s"} (and their shelves and progress)? Your real imported books are left untouched.`,
+    "Clear"
+  );
+  if (!ok) return;
+  seeding = true;
+  try {
+    await clearSeededContent();
+    renderCurrentRoute();
+  } catch (err) {
+    console.warn("Clearing seeded content failed", err);
+    alert("Clearing failed: " + (err?.message || err));
   } finally {
     seeding = false;
   }
