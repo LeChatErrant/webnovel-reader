@@ -1,0 +1,18 @@
+dist
+dev-dist
+node_modules
+public
+package-lock.json
+
+# The DOM-builder code (the entry module and the UI modules split out of it) is
+# deliberately hand-formatted: nested h(...) calls are indented to mirror the DOM
+# tree, and the inline SVG icon strings are kept one-per-line. Prettier reflows
+# both in ways that hurt readability, so it is scoped to the pure-logic modules
+# (src/lib/**) and to tests/config, and left off the hand-formatted sources.
+src/*.js
+src/*.css
+index.html
+README.md
+CLAUDE.md
+scripts/**
+vite.config.js

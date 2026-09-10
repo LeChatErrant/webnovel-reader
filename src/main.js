@@ -8,6 +8,13 @@ import "./style.css";
 // unstyled (dark-on-dark) text online, and permanently dark text offline
 // (that in-iframe request never hit the service-worker precache).
 import readerThemeCss from "./reader-theme.css?raw";
+import { formatBytes, formatPublished, formatAdded, formatLang, stripHtml } from "./lib/format.js";
+import { normalize, parseVolumeIndex, stripVolume, seriesKey, toRoman, parseChapterLabel, longestCommonName } from "./lib/text.js";
+import {
+  CHAPTER_DONE_PCT, MIN_SCROLL_PCT, baseHref, isFrontMatter, readableChapters,
+  chapterCount, chapterOrdinalFor, markEarlierDone, flatten,
+  previewWindow, scrollAnchorFor,
+} from "./lib/chapters.js";
 
 // =========================================================================
 // Webnovel reader — a private, offline, on-device library.
@@ -57,7 +64,6 @@ function tx(store, mode, fn) {
 const dbGetAll = (store) => tx(store, "readonly", (os) => os.getAll());
 const dbPut = (store, value) => tx(store, "readwrite", (os) => os.put(value));
 const dbDelete = (store, key) => tx(store, "readwrite", (os) => os.delete(key));
-const dbClear = (store) => tx(store, "readwrite", (os) => os.clear());
 const kvGet = (key) => tx("kv", "readonly", (os) => os.get(key));
 const kvSet = (key, value) => tx("kv", "readwrite", (os) => os.put(value, key));
 const kvDelete = (key) => tx("kv", "readwrite", (os) => os.delete(key));
@@ -228,56 +234,11 @@ function progressBar(pct, variant) {
 }
 
 // -------------------------------------------------------------------------
-// Derived reading state.
+// Derived reading state. Front-matter detection, the readable-chapter view,
+// chapter counting/numbering and the progress constants are pure functions of a
+// book object; they live in ./lib/chapters.js (imported above) and are unit-
+// tested there.
 // -------------------------------------------------------------------------
-// Web-novel epubs bundle front matter ahead of the real chapters: the same
-// metadata/synopsis page we now render as our own info page, plus an in-book
-// contents page that duplicates our chapter drawer. We hide these from the
-// reader flow, the chapter menu and the chapter counts/numbers.
-const FRONT_MATTER_RE =
-  /^(informations?|table of contents|contents|toc|cover|title\s*page|copyright|colophon)$/i;
-// Public-domain epubs (e.g. Project Gutenberg) tack a licence / boilerplate
-// page onto the spine and TOC; it is never a real chapter, so hide it too.
-const isFrontMatter = (label) => {
-  const t = (label || "").trim();
-  return FRONT_MATTER_RE.test(t) || /project gutenberg/i.test(t) || /\blicen[sc]e$/i.test(t);
-};
-// Never hide everything: if a whole TOC somehow matched, fall back to the
-// original so the reader is never left empty.
-function readableChapters(entries) {
-  const kept = (entries || []).filter((e) => !isFrontMatter(e.label));
-  return kept.length ? kept : entries || [];
-}
-const frontMatterCount = (book) => (book?.chapters || []).filter((e) => isFrontMatter(e.label)).length;
-
-// Count the readable chapters, not spine items: the spine can carry extra
-// front matter (e.g. an untracked cover page) the TOC never lists, so the
-// readable TOC is the honest basis for counts and numbering.
-function chapterCount(book) {
-  return readableChapters(book.chapters || []).length || book.spineCount || 1;
-}
-// Which chapter (1-based, within its volume) a saved position sits on, counted
-// over the readable TOC by label so leading front matter never inflates it.
-function chapterOrdinalFor(book, p) {
-  if (!p) return 1;
-  const readable = readableChapters(book.chapters || []);
-  const i = readable.findIndex((e) => e.label && e.label === p.chapterLabel);
-  if (i >= 0) return i + 1;
-  return Math.max(1, (p.chapterIndex ?? 0) + 1 - frontMatterCount(book));
-}
-// A chapter is "read" once you reach its end. We can't count on the very last
-// pixel scrolling into view (trailing whitespace, the injected end-of-chapter
-// card), so anything at or past this fraction counts as complete.
-const CHAPTER_DONE_PCT = 92;
-// Opening a chapter must not, by itself, register progress or completion — the
-// reader has to actually move this far past where the chapter opened before it
-// counts as started. Keeps a stray tap off the "reading"/done state and off the
-// resume chip.
-const MIN_SCROLL_PCT = 5;
-// Strip the fragment from an href so a spine section and its TOC anchor share a
-// key. Defined here (not down in the reader) because the per-chapter progress
-// map below is keyed by it.
-const baseHref = (href) => (href || "").split("#")[0];
 
 // -------------------------------------------------------------------------
 // Per-chapter progress. Each book's progress record carries a `chapters` map
@@ -292,21 +253,6 @@ function chapterProgress(book, href) {
   const p = progressMap[book?.id];
   const h = baseHref(href);
   return p && p.chapters && h ? p.chapters[h] || null : null;
-}
-function chapterDone(book, href) {
-  const st = chapterProgress(book, href);
-  return !!(st && st.done);
-}
-// Chapter skipping: mark every readable chapter before `href` complete, in place
-// on a chapters map. Finishing a chapter implies the ones before it are read.
-function markEarlierDone(book, href, chapters) {
-  const readable = readableChapters(book.chapters || []);
-  const idx = readable.findIndex((e) => baseHref(e.href) === baseHref(href));
-  for (let i = 0; i < idx; i++) {
-    const k = baseHref(readable[i].href);
-    if (!k || chapters[k]?.done) continue;
-    chapters[k] = { pct: 100, cfi: chapters[k]?.cfi || null, done: true };
-  }
 }
 // Number of readable chapters completed in this book.
 function doneCount(book) {
@@ -326,15 +272,6 @@ function bookPercent(book) {
 }
 function bookIsStarted(book) {
   return !!progressMap[book.id];
-}
-// Roman numeral for the title-collision cue (11c). Volume indexes are small, so
-// the full 1–3999 converter is overkill but harmless.
-function toRoman(n) {
-  if (!n || n < 1) return "";
-  const map = [[1000, "M"], [900, "CM"], [500, "D"], [400, "CD"], [100, "C"], [90, "XC"], [50, "L"], [40, "XL"], [10, "X"], [9, "IX"], [5, "V"], [4, "IV"], [1, "I"]];
-  let out = "", r = n;
-  for (const [v, sym] of map) while (r >= v) { out += sym; r -= v; }
-  return out;
 }
 function seriesVolumes(s) {
   return (s.bookIds || []).map(bookById).filter(Boolean);
@@ -416,29 +353,6 @@ function continueSubtitle(book) {
 // -------------------------------------------------------------------------
 // Epub parsing on import — title, author, cover blob, chapter list.
 // -------------------------------------------------------------------------
-function flatten(items, depth = 0, out = []) {
-  for (const item of items || []) {
-    out.push({ label: (item.label || "").trim(), href: item.href, depth });
-    if (item.subitems?.length) flatten(item.subitems, depth + 1, out);
-  }
-  return out;
-}
-// Pull a volume number out of a title or filename ("vol 2", "v2", "part 2").
-function parseVolumeIndex(text) {
-  if (!text) return null;
-  const m = text.match(/\b(?:vol(?:ume)?\.?|v|part|book)\s*(\d{1,3})\b/i) || text.match(/\b(\d{1,3})\b\s*$/);
-  return m ? parseInt(m[1], 10) : null;
-}
-// Title with any volume marker stripped, for series naming + duplicate keys.
-function stripVolume(title) {
-  return (title || "")
-    .replace(/\b(?:vol(?:ume)?\.?|v|part|book)\s*\d{1,3}\b/gi, "")
-    .replace(/[\s\-–—:·|]+$/g, "")
-    .trim();
-}
-const normalize = (s) => (s || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
-const seriesKey = (book) => normalize(stripVolume(book.title)) + "|" + normalize(book.author);
-
 // dc:subject isn't exposed by epub.js's parsed metadata, so read it straight
 // from the package document. Best-effort: any failure just yields no subjects.
 async function parseSubjects(b) {
@@ -571,7 +485,6 @@ async function suggestGrouping(added) {
     if (grouped) continue; // already one series
     if (cluster.length < 2) continue;
     const name = stripVolume(nb.title) || nb.title;
-    // eslint-disable-next-line no-await-in-loop
     const grouping = await showSuggestSheet(name, cluster.length);
     if (grouping) await groupIntoSeries(cluster.map((b) => b.id), name);
     renderCurrentRoute();
@@ -830,46 +743,8 @@ function toggleSort() {
 // standalone book gets the same page without it.
 // =========================================================================
 
-// A few small formatters for the metadata table / volume sheet.
-function formatBytes(n) {
-  if (!n) return "";
-  const mb = n / (1024 * 1024);
-  if (mb >= 1) return mb.toFixed(1) + " MB";
-  return Math.max(1, Math.round(n / 1024)) + " KB";
-}
-function formatPublished(v) {
-  if (!v) return "";
-  const m = String(v).match(/\d{4}/);
-  return m ? m[0] : String(v);
-}
-function formatAdded(ts) {
-  if (!ts) return "";
-  try {
-    return new Date(ts).toLocaleDateString(undefined, { day: "numeric", month: "long" });
-  } catch {
-    return "";
-  }
-}
-const LANG_NAMES = {
-  en: "English", fr: "French", ja: "Japanese", zh: "Chinese", es: "Spanish",
-  de: "German", ko: "Korean", ru: "Russian", it: "Italian", pt: "Portuguese",
-};
-function formatLang(code) {
-  if (!code) return "";
-  const k = String(code).toLowerCase().split(/[-_]/)[0];
-  return LANG_NAMES[k] || code;
-}
-// Strip HTML from a description without loading any resources (DOMParser does
-// not run scripts or fetch), keeping paragraph breaks as newlines.
-function stripHtml(html) {
-  try {
-    const doc = new DOMParser().parseFromString(String(html), "text/html");
-    doc.querySelectorAll("p, br, div, li").forEach((n) => n.after(doc.createTextNode("\n")));
-    return (doc.body.textContent || "").replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
-  } catch {
-    return String(html);
-  }
-}
+// The metadata-table / volume-sheet formatters (formatBytes, formatPublished,
+// formatAdded, formatLang) and stripHtml are pure and live in ./lib/format.js.
 
 // The text fields the info page shows and Edit details can type over.
 const META_FIELDS = ["author", "description", "language", "published", "publisher"];
@@ -1176,16 +1051,6 @@ function addVolumeToSeries(seriesId) {
   pickFiles();
 }
 
-function renameSeries(s) {
-  showNameSheet("Rename series", s.name, "Save").then((name) => {
-    if (name) {
-      s.name = name;
-      dbPut("series", s);
-      renderInfo("series", s.id);
-    }
-  });
-}
-
 async function confirmDeleteSeries(s) {
   const vols = seriesVolumes(s);
   const ok = await showConfirmSheet(
@@ -1194,7 +1059,7 @@ async function confirmDeleteSeries(s) {
     "Delete"
   );
   if (!ok) return;
-  for (const b of vols) await deleteBook(b.id); // eslint-disable-line no-await-in-loop
+  for (const b of vols) await deleteBook(b.id);
   go({ route: "library" });
 }
 
@@ -1617,19 +1482,6 @@ function chaptersModel(kind, id) {
   };
 }
 
-// Absolute number of the row the Chapters screen should open scrolled to: the
-// current (resume) chapter if there is one, else the last-read chapter (the
-// resume ordinal in the current volume, even though it is now marked "read"),
-// else null (an unopened book stays at the top).
-function scrollAnchorFor(items, curItem, curBookId, curLocal) {
-  if (curItem) return curItem.absNum;
-  if (curBookId && curLocal >= 0) {
-    const anchor = items.find((it) => it.bookId === curBookId && it.localIndex === curLocal);
-    if (anchor) return anchor.absNum;
-  }
-  return null;
-}
-
 // Push the Chapters screen. `volId` presets the volume filter (from a volume
 // sheet or a series' current volume); null shows the whole story.
 function openChapters(kind, id, { volId = null } = {}) {
@@ -1643,20 +1495,6 @@ function openChapters(kind, id, { volId = null } = {}) {
 // route into the full Chapters screen (2e), so the common case (resume, or step
 // one chapter) never has to open it.
 // -------------------------------------------------------------------------
-
-// The five rows to show: an unopened book shows chapters 1–5; a book in progress
-// shows two before the anchor chapter, the anchor, and two after (clamped to the
-// ends). Five or fewer chapters show them all. `anchorAbs` is the row to centre on
-// — the current (resume) chapter if there is one, else the last-read chapter, so a
-// finished book previews where you left off instead of falling back to 1–5.
-function previewWindow(items, anchorAbs) {
-  if (items.length <= 5) return items;
-  let cur = anchorAbs != null ? items.findIndex((it) => it.absNum === anchorAbs) : -1;
-  if (cur < 0) cur = items.findIndex((it) => it.state === "current");
-  if (cur < 0) return items.slice(0, 5);
-  const start = Math.max(0, Math.min(cur - 2, items.length - 5));
-  return items.slice(start, start + 5);
-}
 
 function cprevRow(it) {
   // The resume chapter reopens the book where you left off; every other row
@@ -2101,16 +1939,6 @@ async function confirmGrouping() {
     exitSelection();
   }
 }
-function longestCommonName(titles) {
-  if (!titles.length) return "";
-  let prefix = titles[0];
-  for (const t of titles.slice(1)) {
-    let i = 0;
-    while (i < prefix.length && i < t.length && prefix[i].toLowerCase() === t[i].toLowerCase()) i++;
-    prefix = prefix.slice(0, i);
-  }
-  return prefix.replace(/[\s\-–—:·|]+$/g, "").trim();
-}
 
 // =========================================================================
 // Deleting books — from the library (long-press → select → Delete) or from a
@@ -2166,7 +1994,7 @@ async function confirmDeleteSelection() {
     "Delete"
   );
   if (!ok) return;
-  for (const id of ids) await deleteBook(id); // eslint-disable-line no-await-in-loop
+  for (const id of ids) await deleteBook(id);
   exitSelection(); // re-renders the library
 }
 
@@ -2795,22 +2623,6 @@ function injectReaderTheme(contents) {
   style.id = "webnovel-theme";
   style.textContent = RESOLVED_READER_THEME_CSS;
   (doc.head || doc.documentElement).appendChild(style);
-}
-
-// Split a TOC label into its own embedded chapter number (if any) and a clean
-// title. Many books label chapters "Chapter 230: Precarious Alliance" (or
-// "Ch. 230 - ...", "230. ..."); the embedded number is the one the reader sees
-// in the top bar, and it can differ from the positional ordinal when the book
-// carries front matter. Bare-title books ("Ashen Barrens") return num: null so
-// callers can fall back to the positional ordinal.
-function parseChapterLabel(label) {
-  const s = (label || "").trim();
-  let m = s.match(/^(?:chapters?|chap|ch|episodes?|ep|parts?|vol(?:ume)?)\.?\s*(\d+)\s*[:.\-–—)]*\s*(.*)$/i);
-  if (m) return { num: parseInt(m[1], 10), title: m[2].trim() };
-  if (/^\d+$/.test(s)) return { num: parseInt(s, 10), title: "" };
-  m = s.match(/^(\d+)\s*[:.\-–—)]\s*(.*)$/);
-  if (m) return { num: parseInt(m[1], 10), title: m[2].trim() };
-  return { num: null, title: s };
 }
 
 function injectChapterNav(contents) {
