@@ -2269,6 +2269,13 @@ let resumeChipHref = null;
 // Where the current chapter first appeared, so we can measure how far the reader
 // scrolled from there (see MIN_SCROLL_PCT) before crediting any progress.
 let chapterEntryBaseline = { href: null, pct: 0 };
+// True while a resume is still settling the scroll onto the saved spot. epub.js
+// fires `relocated` for the transient positions it passes through on the way
+// there (and for our own corrective scrolls); persisting those would overwrite
+// the good saved position with a half-restored one — a backward drift that then
+// sticks for every later open. So while this is set, `relocated` updates the UI
+// but does not persist. Explicit flushes (lock/app-switch) still persist.
+let restoreActive = false;
 
 // Persist an epub.js location as the current reading position. Called on every
 // `relocated` while scrolling, and once more when the app is backgrounded so
@@ -2288,66 +2295,78 @@ function readerContentDoc() {
 // After a resume display() settles, correct the chapter view to the exact saved
 // pixel offset. epub.js positions to the CFI's top-of-viewport word, which can
 // collapse to a paragraph's start and leave you "a bit before" where you were;
-// reapplying the raw scrollTop removes that drift. Safe because a resume only
-// ever restores within the same chapter on the same device (stable layout).
+// reapplying the raw scrollTop removes that drift.
 //
-// Timing is the subtle part. The book face (Spectral) is `font-display: swap`,
-// so a fresh load — which is exactly what a *long* phone-lock forces, once the
-// OS discards the suspended page — first lays the chapter out in the fallback
-// serif, then reflows when Spectral swaps in. If we set scrollTop during that
-// fallback layout we clamp it against a shorter scrollHeight; the later reflow
-// then leaves the resume a screen *above* the saved spot (the "after a long
-// lock it goes back before where I was" bug). So we re-apply once the iframe's
-// fonts have actually loaded and the text has reflowed to its final height, and
-// again over a short window as insurance — bailing the moment the reader scrolls
-// so an active reader is never yanked. A short lock keeps the page in memory and
-// never re-renders, so none of this runs then.
+// The hard part is *when* the layout is final. The book face (Spectral) is
+// `font-display: swap`, so a fresh load — which a *long* phone-lock forces, once
+// the OS discards the suspended page — first lays the chapter out in the
+// fallback serif, then reflows when Spectral swaps in. epub.js also sizes the
+// view asynchronously. Any correction applied before all that settles is against
+// the wrong height, and the later reflow leaves the resume a variable distance
+// *above* the saved spot — the "after a long lock it goes back before where I
+// was" bug. `fonts.ready` is not a reliable gate (it can resolve before a lazily
+// requested face is even fetched), so instead of guessing a moment we hold the
+// target pinned: re-assert the saved offset every frame until the layout stops
+// changing, then a moment longer, capped by a hard deadline. Clamping to the
+// live scrollHeight each frame means a still-growing chapter climbs to the exact
+// saved offset as its final height arrives. We stop the instant the reader
+// actually interacts (touch / wheel / key / pointer) so an active reader is
+// never yanked — a short lock keeps the page in memory and never runs this.
+const RESTORE_MAX_MS = 4000; // hard cap on how long we keep correcting
+const RESTORE_STABLE_MS = 400; // layout must hold this long before we let go
 function restoreScrollAfter(shown, scrollTop) {
+  restoreActive = true;
   Promise.resolve(shown)
     .then(() => {
       const c = rendition?.manager?.container;
-      if (!c) return;
+      if (!c) {
+        restoreActive = false;
+        return;
+      }
 
       let interacted = false;
       const markInteracted = () => {
         interacted = true;
       };
       const targets = [c, readerContentDoc()].filter(Boolean);
-      for (const t of targets) {
-        t.addEventListener("wheel", markInteracted, { passive: true });
-        t.addEventListener("touchstart", markInteracted, { passive: true });
-        t.addEventListener("keydown", markInteracted, { passive: true });
-      }
-      const cleanup = () => {
-        for (const t of targets) {
-          t.removeEventListener("wheel", markInteracted);
-          t.removeEventListener("touchstart", markInteracted);
-          t.removeEventListener("keydown", markInteracted);
-        }
-      };
+      const evs = ["wheel", "touchstart", "keydown", "pointerdown"];
+      for (const t of targets) for (const e of evs) t.addEventListener(e, markInteracted, { passive: true });
 
-      const apply = () => {
-        if (interacted || !c.isConnected) return;
+      const start = performance.now();
+      let lastHeight = -1;
+      let stableSince = 0;
+      const finish = () => {
+        for (const t of targets) for (const e of evs) t.removeEventListener(e, markInteracted);
+        // One last persist of where we actually landed, then reopen the gate so
+        // ordinary scroll-driven saves resume from the correct position.
+        restoreActive = false;
+        try {
+          const loc = rendition?.location;
+          if (loc?.start) saveReadingLocation(loc);
+        } catch (_) {}
+      };
+      const tick = (now) => {
+        if (interacted || !c.isConnected || !rendition) return finish();
         const max = Math.max(0, c.scrollHeight - c.clientHeight);
         const y = Math.min(scrollTop, max);
         if (y > 0) c.scrollTop = y;
+        // Consider the layout settled once its scrollable height (which the font
+        // swap and epub.js's sizing both change) has held steady for a beat.
+        if (max === lastHeight) {
+          if (!stableSince) stableSince = now;
+        } else {
+          lastHeight = max;
+          stableSince = 0;
+        }
+        const settled = stableSince && now - stableSince >= RESTORE_STABLE_MS && y >= scrollTop;
+        if (settled || now - start >= RESTORE_MAX_MS) return finish();
+        requestAnimationFrame(tick);
       };
-
-      // Best-effort now (covers a font already cached and applied), then again
-      // once the chapter's web font has loaded and reflowed to its final height.
-      requestAnimationFrame(apply);
-      const doc = readerContentDoc();
-      if (doc?.fonts?.ready) {
-        doc.fonts.ready.then(() => requestAnimationFrame(apply)).catch(() => {});
-      }
-      // Belt-and-braces: fonts.ready can resolve a frame before the reflow
-      // paints, and some engines never expose it on the iframe. Re-apply across
-      // a short window, then stop listening.
-      setTimeout(apply, 150);
-      setTimeout(apply, 400);
-      setTimeout(cleanup, 600);
+      requestAnimationFrame(tick);
     })
-    .catch(() => {});
+    .catch(() => {
+      restoreActive = false;
+    });
 }
 
 function saveReadingLocation(location) {
@@ -2464,6 +2483,7 @@ async function renderReader(lib, startHref = null) {
   // Fresh book: forget any resume-chip dismissals and clear a stale chip.
   resumeDismissed = new Set();
   hideResumeChip();
+  restoreActive = false; // never carry a settling-restore flag across books
   chapterEntryBaseline = { href: null, pct: 0 };
   updateChapterTitle(null);
   el.topTitle.textContent = displayTitle(lib);
@@ -2530,7 +2550,11 @@ async function renderReader(lib, startHref = null) {
     // Re-render the drawer list so read-state and the highlight track the move.
     renderToc();
     updateChapterTitle(currentHref);
-    saveReadingLocation(location);
+    // While a resume is still settling, don't persist the transient positions
+    // epub.js reports on the way to the saved spot — they would overwrite the
+    // good position with a half-restored one. restoreScrollAfter persists the
+    // final landing itself once the layout stops moving.
+    if (!restoreActive) saveReadingLocation(location);
     updateDrawerBook();
   });
 
