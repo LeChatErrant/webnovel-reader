@@ -68,12 +68,37 @@ it opens offline forever.
 
 ## Layout
 
-- `src/main.js` — app logic (epub.js rendering, TOC, persistence)
+The app is plain ES modules (no framework); Vite bundles them into one file, so
+the split is purely for readability — there is no runtime cost. Each module owns
+one concern:
+
+- `src/main.js` — entry: pulls the modules together, wires the static chrome, boots
+- `src/db.js` — IndexedDB primitives
+- `src/state.js` — in-memory library data + persistence (single source of truth)
+- `src/reading.js` — derived reading state (percentages, ordinals, titles)
+- `src/dom.js` — element builder, icons, cover cache, element refs, touch gestures
+- `src/sheets.js` — action sheet + confirm / name / suggest prompts
+- `src/router.js` — routing + the overlay/Back history stack
+- `src/import.js` — `.epub` parsing, import/grouping, dev-seed
+- `src/library.js` — home screen + multi-select
+- `src/info.js` — info page + editors + volume sheet
+- `src/chapters.js` — chapters screen + shared chapter-preview component
+- `src/reader.js` — reading surface, drawer, resume, chapter-nav injection
+- `src/pwa.js` — install prompt + service-worker update banner
+- `src/lib/` — pure, unit-tested helpers (`text`, `chapters`, `format` math)
 - `src/style.css` — app chrome (top bar, drawer, landing)
-- `public/reader-theme.css` — the Webnovel-dark theme injected into each chapter
+- `src/reader-theme.css` — the Webnovel-dark theme injected into each chapter
 - `public/fonts/` — Merriweather (OFL) static faces
 - `scripts/fetch-seed.mjs` — downloads the dev-seed books into `public/seed/`
 - `vite.config.js` — Vite + PWA (service worker, manifest) config
+
+## Quality checks
+
+```bash
+npm test          # Vitest unit tests over the pure logic in src/lib
+npm run lint      # ESLint (flat config)
+npm run format    # Prettier (pure-logic modules, tests, config)
+```
 
 ## Dev seeding
 
