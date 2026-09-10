@@ -9,8 +9,19 @@ for the feature/layout overview.
 Deploys happen by pushing to `main`: the
 [Deploy to GitHub Pages workflow](.github/workflows/deploy.yml) builds `dist/`
 and publishes it to <https://lechaterrant.github.io/webnovel-reader/>. The
-maintainer deploys **only through Claude**, so when asked to "deploy" (also
-"ship it", "push it live", "release"), follow this exactly:
+maintainer deploys **only through Claude**.
+
+**Ship by default.** The maintainer is the sole user and wants to iterate fast,
+so after any change that touches the shipped app (source, assets, build config),
+**deploy it without waiting to be asked** — treat every such change as an
+implicit "ship it". Follow the exact procedure below every time. Only hold off
+when: the change doesn't affect the built app (e.g. docs, CI, scripts, this
+file — commit and push those, but no version bump/deploy is needed); the build
+is red or the work is knowingly incomplete/experimental; or the maintainer says
+not to. When in doubt, ship. An explicit "deploy" / "ship it" / "push it live" /
+"release" always means ship now.
+
+Whether prompted or shipping by default, follow this exactly:
 
 1. **Bump the version first.** Increment `package.json` + `package-lock.json`:
    ```bash
