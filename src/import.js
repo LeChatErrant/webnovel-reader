@@ -15,6 +15,7 @@ import { el, coverUrls } from "./dom.js";
 import { seriesVolumes } from "./reading.js";
 import { showSuggestSheet, showActionSheet, showConfirmSheet } from "./sheets.js";
 import { renderCurrentRoute } from "./router.js";
+import { refreshChapterNav } from "./reader.js";
 
 // -------------------------------------------------------------------------
 // Epub parsing on import — title, author, cover blob, chapter list.
@@ -128,6 +129,10 @@ export async function importFiles(fileList) {
   }
 
   renderCurrentRoute();
+  // If the volume was added straight from the reader's volume-boundary card, the
+  // reader is still on screen — refresh its stale "Add a volume" card so it turns
+  // into "Continue to Vol. N" without waiting for a trip back home.
+  if (intoSeriesId) refreshChapterNav();
   if (!intoSeriesId) await suggestGrouping(added);
 }
 

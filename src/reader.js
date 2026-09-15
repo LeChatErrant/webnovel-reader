@@ -704,6 +704,21 @@ function injectChapterNav(contents) {
   doc.body.appendChild(wrap);
 }
 
+// Rebuild the end-of-chapter card in every live chapter document. The card is
+// injected once (injectChapterNav bails if one already exists), so anything that
+// changes what it should say — most notably adding the next volume to the series
+// from the volume-boundary card — has to drop the stale card and re-inject, or
+// the reader keeps showing "Add a volume" until the whole view is torn down.
+export function refreshChapterNav() {
+  if (!rendition || document.getElementById("app").dataset.route !== "reader") return;
+  const contentsList = rendition.getContents?.() || [];
+  for (const contents of contentsList) {
+    const existing = contents?.document?.querySelector(".chapter-end");
+    if (existing) existing.remove();
+    injectChapterNav(contents);
+  }
+}
+
 // -------------------------------------------------------------------------
 // Drawer
 // -------------------------------------------------------------------------
