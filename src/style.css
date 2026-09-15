@@ -1150,6 +1150,11 @@ html, body {
   touch-action: none;
 }
 .order-row__handle:active { cursor: grabbing; }
+/* The icon must not be the pointer target: on touch, a press landing on the SVG
+   (touch-action: auto) is claimed as a scroll gesture and fires pointercancel,
+   killing the drag before it starts. Routing pointers to the handle itself lets
+   its touch-action: none take effect so the reorder drag works on Android. */
+.order-row__handle svg { pointer-events: none; }
 .order-row__title { flex: 1 1 auto; min-width: 0; font: 400 13.5px var(--font-ui); color: #a8b0bc; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .order-row__range { flex: none; font: 400 11.5px var(--font-ui); color: #5b636f; }
 
