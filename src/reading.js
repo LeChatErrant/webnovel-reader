@@ -128,7 +128,12 @@ export function continueSubtitle(book) {
   const parts = [];
   if (book.seriesId && book.volumeIndex) parts.push("Vol. " + book.volumeIndex);
   parts.push("Chapter " + abs);
-  if (p?.chapterLabel) parts.push(p.chapterLabel);
+  // Append only the clean title, not the raw label — otherwise the embedded
+  // number repeats the "Chapter N" we just pushed ("Chapter 118 · Chapter 118:
+  // The Title"). chapterDisplay strips the "Chapter N" prefix; a bare-title
+  // chapter keeps its label, a numbered-but-titleless one adds nothing.
+  const { title } = chapterDisplay({ label: p?.chapterLabel }, abs);
+  if (title) parts.push(title);
   return parts.join(" · ");
 }
 
