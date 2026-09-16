@@ -214,18 +214,19 @@ export function attachOrderDrag(row, list, onReorder) {
       onReorder();
     };
     const up = () => {
-      try { row.releasePointerCapture(e.pointerId); } catch { /* ignore */ }
-      row.removeEventListener("pointermove", move);
-      row.removeEventListener("pointerup", up);
-      row.removeEventListener("pointercancel", up);
+      document.removeEventListener("pointermove", move);
+      document.removeEventListener("pointerup", up);
+      document.removeEventListener("pointercancel", up);
       row.classList.remove("dragging");
     };
-    row.addEventListener("pointermove", move);
-    row.addEventListener("pointerup", up);
-    row.addEventListener("pointercancel", up);
-    // Pointer capture keeps the drag alive when the finger leaves the row. It can
-    // throw for a stale/synthetic pointer id — never let that abort the drag we
-    // just wired up.
-    try { row.setPointerCapture(e.pointerId); } catch { /* ignore */ }
+    // Track the pointer on the document, not the row. Explicit pointer capture on
+    // the row is released almost immediately on touch (Chrome/Android), which
+    // dropped the drag the moment the finger left the starting row and left the
+    // list unchanged. Document-level listeners receive every move for the whole
+    // gesture regardless of which row is under the finger. touch-action: none on
+    // the row (see CSS) stops the browser claiming the gesture for scrolling.
+    document.addEventListener("pointermove", move);
+    document.addEventListener("pointerup", up);
+    document.addEventListener("pointercancel", up);
   });
 }
