@@ -4,8 +4,10 @@ import {
   isFrontMatter,
   readableChapters,
   frontMatterCount,
+  leadingFrontMatterCount,
   chapterCount,
   chapterOrdinalFor,
+  chapterDisplay,
   markEarlierDone,
   flatten,
   previewWindow,
@@ -33,9 +35,18 @@ describe("isFrontMatter", () => {
     expect(isFrontMatter("License")).toBe(true);
     expect(isFrontMatter("Licence")).toBe(true);
   });
+  it("flags trailing back matter (the notes page every scraped volume ends with)", () => {
+    ["Notes", "Note", "Author's Notes", "Authors Note", "Translator's Notes", "Afterword", "Foreword", "Acknowledgements", "About the Author"].forEach(
+      (l) => expect(isFrontMatter(l)).toBe(true)
+    );
+  });
   it("does not flag real chapters", () => {
     expect(isFrontMatter("Chapter 1")).toBe(false);
     expect(isFrontMatter("The Sanctuary")).toBe(false);
+    // The whole-label anchor keeps a real chapter that merely mentions a
+    // boilerplate word from being hidden.
+    expect(isFrontMatter("Chapter 5: Notes")).toBe(false);
+    expect(isFrontMatter("Footnotes of a Madman")).toBe(false);
   });
 });
 
@@ -66,9 +77,52 @@ describe("chapterCount", () => {
 });
 
 describe("frontMatterCount", () => {
-  it("counts the leading front matter", () => {
-    const book = { chapters: [ch("Cover", "c"), ch("Contents", "t"), ch("Chapter 1", "1")] };
-    expect(frontMatterCount(book)).toBe(2);
+  it("counts all boilerplate, front and back", () => {
+    const book = { chapters: [ch("Cover", "c"), ch("Contents", "t"), ch("Chapter 1", "1"), ch("Notes", "n")] };
+    expect(frontMatterCount(book)).toBe(3);
+  });
+});
+
+describe("leadingFrontMatterCount", () => {
+  it("counts only the boilerplate before the first real chapter", () => {
+    const book = { chapters: [ch("Cover", "c"), ch("Contents", "t"), ch("Chapter 1", "1"), ch("Notes", "n")] };
+    // Cover + Contents lead; the trailing Notes page must not be counted, or a
+    // spine-index fallback would land one chapter early.
+    expect(leadingFrontMatterCount(book)).toBe(2);
+  });
+});
+
+// A multi-volume series: every scraped volume ends with a "Notes" page. It must
+// be dropped so counts stay honest and the cross-volume offset never drifts.
+describe("readableChapters + chapterCount with a trailing notes page", () => {
+  const volume = {
+    chapters: [ch("Information", "i"), ch("Table of Contents", "t"), ch("Chapter 1: Nightmare Begins", "0"), ch("Chapter 2: Slave Caravan", "1"), ch("Notes", "n")],
+  };
+  it("keeps only the real chapters", () => {
+    expect(readableChapters(volume.chapters).map((e) => e.label)).toEqual(["Chapter 1: Nightmare Begins", "Chapter 2: Slave Caravan"]);
+  });
+  it("counts 2, not 3 (the notes page no longer inflates it)", () => {
+    expect(chapterCount(volume)).toBe(2);
+  });
+});
+
+describe("chapterDisplay", () => {
+  it("reads the number and clean title from the label (colon form)", () => {
+    expect(chapterDisplay(ch("Chapter 96: Exile"), 1)).toEqual({ num: 96, title: "Exile" });
+  });
+  it("handles the no-separator form some volumes use", () => {
+    expect(chapterDisplay(ch("Chapter 2721 The Ship of Theseus"), 1)).toEqual({ num: 2721, title: "The Ship of Theseus" });
+  });
+  it("prefers the label number over the positional fallback", () => {
+    // Position says 1, but the book states 96 — the stated number wins.
+    expect(chapterDisplay(ch("Chapter 96: Exile"), 1).num).toBe(96);
+  });
+  it("falls back to the positional number and raw label for bare titles", () => {
+    expect(chapterDisplay(ch("Prologue"), 7)).toEqual({ num: 7, title: "Prologue" });
+    expect(chapterDisplay(ch("Ashen Barrens"), 3)).toEqual({ num: 3, title: "Ashen Barrens" });
+  });
+  it("keeps a numbered-but-titleless chapter's title empty", () => {
+    expect(chapterDisplay(ch("Chapter 96"), 5)).toEqual({ num: 96, title: "" });
   });
 });
 

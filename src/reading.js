@@ -6,7 +6,8 @@
 // opening one never completes it.
 // -------------------------------------------------------------------------
 import { books, progressMap, ui, bookById, seriesById } from "./state.js";
-import { chapterCount, chapterOrdinalFor, readableChapters, baseHref } from "./lib/chapters.js";
+import { chapterCount, chapterOrdinalFor, chapterDisplay, readableChapters, baseHref } from "./lib/chapters.js";
+import { parseChapterLabel } from "./lib/text.js";
 
 // The per-chapter progress entry for one chapter: { pct, cfi, done } or null.
 export function chapterProgress(book, href) {
@@ -89,6 +90,25 @@ export function volumeChapterOffset(book) {
   }
   return offset;
 }
+// The absolute chapter number to DISPLAY for a saved position. Prefers the
+// number the book states in the chapter's own TOC label, which is authoritative
+// and self-correcting across volumes: a missing volume, a stray page, or a
+// trailing notes page never shifts it. Falls back to the positional ordinal +
+// volume offset for books whose labels carry no number.
+export function absChapterNum(book, p) {
+  const embedded = parseChapterLabel(p?.chapterLabel).num;
+  return embedded != null ? embedded : chapterOrdinalFor(book, p) + volumeChapterOffset(book);
+}
+// First / last absolute chapter number of a volume, read from its own labels
+// (embedded number preferred), for the reader header's "n of total".
+export function volumeFirstAbs(book) {
+  const r = readableChapters(book.chapters || []);
+  return r.length ? chapterDisplay(r[0], 1 + volumeChapterOffset(book)).num : 1 + volumeChapterOffset(book);
+}
+export function volumeLastAbs(book) {
+  const r = readableChapters(book.chapters || []);
+  return r.length ? chapterDisplay(r[r.length - 1], r.length + volumeChapterOffset(book)).num : chapterCount(book) + volumeChapterOffset(book);
+}
 export function continueTarget() {
   let best = null,
     bestT = -1;
@@ -104,7 +124,7 @@ export function continueTarget() {
 // "Vol. 2 · Chapter 214 · The Sanctuary"
 export function continueSubtitle(book) {
   const p = progressMap[book.id];
-  const abs = chapterOrdinalFor(book, p) + volumeChapterOffset(book);
+  const abs = absChapterNum(book, p);
   const parts = [];
   if (book.seriesId && book.volumeIndex) parts.push("Vol. " + book.volumeIndex);
   parts.push("Chapter " + abs);

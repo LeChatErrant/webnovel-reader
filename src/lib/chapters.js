@@ -5,6 +5,7 @@
 // most regression-prone logic in the app, so it lives here and is unit-tested in
 // test/chapters.test.js.
 // -------------------------------------------------------------------------
+import { parseChapterLabel } from "./text.js";
 
 // A chapter is "read" once you reach its end. We can't count on the very last
 // pixel scrolling into view (trailing whitespace, the injected end-of-chapter
@@ -20,12 +21,16 @@ export const MIN_SCROLL_PCT = 5;
 // key. The per-chapter progress map is keyed by it.
 export const baseHref = (href) => (href || "").split("#")[0];
 
-// Web-novel epubs bundle front matter ahead of the real chapters: the same
-// metadata/synopsis page we now render as our own info page, plus an in-book
-// contents page that duplicates our chapter drawer. We hide these from the
-// reader flow, the chapter menu and the chapter counts/numbers.
+// Web-novel epubs bundle non-chapter pages around the real chapters: leading
+// front matter (the metadata/synopsis page we render as our own info page, an
+// in-book contents page that duplicates our chapter drawer) and trailing back
+// matter (an "author's notes" page many scrapers append after the last
+// chapter — every Shadow Slave volume ends with one). We hide all of these from
+// the reader flow, the chapter menu and the chapter counts/numbers. The label
+// is matched *whole* (anchored), so a real chapter like "Chapter 5: Notes" is
+// never caught — only a page whose entire label is boilerplate.
 const FRONT_MATTER_RE =
-  /^(informations?|table of contents|contents|toc|cover|title\s*page|copyright|colophon)$/i;
+  /^(informations?|table of contents|contents|toc|cover|title\s*page|copyright|colophon|notes?|author'?s?\s+notes?|translator'?s?\s+notes?|afterword|foreword|acknowledge?ments?|about the author)$/i;
 // Public-domain epubs (e.g. Project Gutenberg) tack a licence / boilerplate
 // page onto the spine and TOC; it is never a real chapter, so hide it too.
 export const isFrontMatter = (label) => {
@@ -40,7 +45,20 @@ export function readableChapters(entries) {
   return kept.length ? kept : entries || [];
 }
 
+// Total boilerplate entries anywhere in the book (front or back matter).
 export const frontMatterCount = (book) => (book?.chapters || []).filter((e) => isFrontMatter(e.label)).length;
+
+// Boilerplate entries that *lead* the TOC (sit before the first real chapter).
+// This — not the total — is the offset for turning a spine index into a
+// readable-TOC ordinal, so a trailing notes page never shifts the count.
+export function leadingFrontMatterCount(book) {
+  let n = 0;
+  for (const e of book?.chapters || []) {
+    if (isFrontMatter(e.label)) n++;
+    else break;
+  }
+  return n;
+}
 
 // Count the readable chapters, not spine items: the spine can carry extra
 // front matter (e.g. an untracked cover page) the TOC never lists, so the
@@ -56,7 +74,22 @@ export function chapterOrdinalFor(book, p) {
   const readable = readableChapters(book.chapters || []);
   const i = readable.findIndex((e) => e.label && e.label === p.chapterLabel);
   if (i >= 0) return i + 1;
-  return Math.max(1, (p.chapterIndex ?? 0) + 1 - frontMatterCount(book));
+  return Math.max(1, (p.chapterIndex ?? 0) + 1 - leadingFrontMatterCount(book));
+}
+
+// Split a TOC entry into the number to show in its badge and the title beside
+// it. Prefer the number the label itself states ("Chapter 96: Exile" -> 96 /
+// "Exile") — that is authoritative and, once the "Chapter N" prefix is stripped,
+// keeps a numbered row from reading "96 · Chapter 96: Exile". `posNum` is the
+// positional fallback (this chapter's absolute position) for books whose labels
+// carry no number, e.g. "Prologue" or "Ashen Barrens"; those keep their raw
+// label as the title.
+export function chapterDisplay(entry, posNum) {
+  const parsed = parseChapterLabel(entry?.label);
+  return {
+    num: parsed.num ?? posNum,
+    title: parsed.num != null ? parsed.title : (entry?.label || "").trim(),
+  };
 }
 
 // Chapter skipping: mark every readable chapter before `href` complete, in place

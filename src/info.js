@@ -9,11 +9,11 @@ import { el, h, svg, ICON, coverNode, coverUrlFor, progressBar, attachLongPress,
 import { progressMap, bookById, seriesById, deleteBook } from "./state.js";
 import { dbPut } from "./db.js";
 import { stripVolume } from "./lib/text.js";
-import { chapterCount, chapterOrdinalFor } from "./lib/chapters.js";
+import { chapterCount } from "./lib/chapters.js";
 import { formatBytes, formatPublished, formatAdded, formatLang, stripHtml } from "./lib/format.js";
 import {
   overrideOf, displayTitle, bookPercent, bookIsStarted, seriesVolumes, currentVolume,
-  volumeNumber, volumeChapterOffset,
+  volumeNumber, absChapterNum, volumeFirstAbs,
 } from "./reading.js";
 import { openBook } from "./reader.js";
 import { go, currentInfo, selectedVolumeId, setSelectedVolumeId, armOverlay, closeOverlay } from "./router.js";
@@ -96,10 +96,10 @@ function continueInfo(m) {
   if (bookPercent(t) >= 100) return { label: "Read again", target: t };
   if (!p) return { label: "Start reading", target: t };
   if (m.kind === "series") {
-    const abs = chapterOrdinalFor(t, p) + volumeChapterOffset(t);
+    const abs = absChapterNum(t, p);
     return { label: `Continue vol. ${volumeNumber(m.series, t)} · ch. ${abs}`, target: t };
   }
-  return { label: `Continue ch. ${chapterOrdinalFor(t, p)}`, target: t };
+  return { label: `Continue ch. ${absChapterNum(t, p)}`, target: t };
 }
 
 export function renderInfo(kind, id) {
@@ -256,7 +256,7 @@ function volumeRow(s, book, start, end, selId) {
   const p = progressMap[book.id];
   let statusText;
   if (pct >= 100) statusText = "finished";
-  else if (p) statusText = "reading ch. " + (chapterOrdinalFor(book, p) + start - 1);
+  else if (p) statusText = "reading ch. " + absChapterNum(book, p);
   else statusText = "not started";
   const title = "Vol. " + volumeNumber(s, book) + (stripVolume(displayTitle(book)) ? " · " + stripVolume(displayTitle(book)) : "");
   const row = h(
@@ -568,7 +568,7 @@ function showVolumeSheet(s, book, start, end) {
   const volNum = volumeNumber(s, book);
   const p = progressMap[book.id];
   const pct = bookPercent(book);
-  const absCh = (p ? chapterOrdinalFor(book, p) : 1) + volumeChapterOffset(book);
+  const absCh = p ? absChapterNum(book, p) : volumeFirstAbs(book);
   const volTitle = "Vol. " + volNum + (stripVolume(displayTitle(book)) ? " · " + stripVolume(displayTitle(book)) : "");
   let statusLine;
   if (pct >= 100) statusLine = "Finished · 100 %";

@@ -10,7 +10,7 @@
 // =========================================================================
 import { el, h, svg, ICON } from "./dom.js";
 import { progressMap, ui, bookById, seriesById, saveUi } from "./state.js";
-import { readableChapters, chapterOrdinalFor, scrollAnchorFor, previewWindow } from "./lib/chapters.js";
+import { readableChapters, chapterOrdinalFor, chapterDisplay, scrollAnchorFor, previewWindow } from "./lib/chapters.js";
 import {
   chapterProgress, bookPercent, seriesVolumes, currentVolume, volumeChapterOffset,
   volumeNumber, displayTitle,
@@ -63,7 +63,8 @@ export function chaptersModel(kind, id) {
       const isCurVol = !!(cur && vol.id === cur.id);
       chs.forEach((e, i) => {
         const { state, pct } = chapterRowState({ vol, e, i, curLocal, isCurVol, finished });
-        items.push({ absNum: offset + i + 1, label: e.label, href: e.href, bookId: vol.id, localIndex: i, state, pct });
+        const { num, title } = chapterDisplay(e, offset + i + 1);
+        items.push({ absNum: num, title, label: e.label, href: e.href, bookId: vol.id, localIndex: i, state, pct });
       });
     }
     const curItem = items.find((it) => it.state === "current");
@@ -85,7 +86,8 @@ export function chaptersModel(kind, id) {
   const curLocal = p ? chapterOrdinalFor(b, p) - 1 : -1;
   const items = chs.map((e, i) => {
     const { state, pct } = chapterRowState({ vol: b, e, i, curLocal, isCurVol: true, finished });
-    return { absNum: i + 1, label: e.label, href: e.href, bookId: b.id, localIndex: i, state, pct };
+    const { num, title } = chapterDisplay(e, i + 1);
+    return { absNum: num, title, label: e.label, href: e.href, bookId: b.id, localIndex: i, state, pct };
   });
   const curItem = items.find((it) => it.state === "current");
   return {
@@ -122,7 +124,7 @@ function cprevRow(it) {
       h(
         "span",
         { class: "cprev__titlewrap" },
-        h("div", { class: "cprev__title" }, it.label || "Untitled"),
+        h("div", { class: "cprev__title" }, it.title || it.label || "Untitled"),
         h("div", { class: "cprev__sub" }, it.pct ? `Reading · ${it.pct} % through` : "Reading")
       )
     );
@@ -131,7 +133,7 @@ function cprevRow(it) {
     "button",
     { class: "cprev__row cprev__row--" + it.state, onclick: open },
     h("span", { class: "cprev__num" }, String(it.absNum)),
-    h("span", { class: "cprev__title" }, it.label || "Untitled"),
+    h("span", { class: "cprev__title" }, it.title || it.label || "Untitled"),
     it.state === "read" ? h("span", { class: "cprev__check" }, svg(ICON.check)) : null
   );
 }
@@ -360,7 +362,7 @@ function chRow(m, it) {
       h(
         "span",
         { class: "ch-row__title-wrap" },
-        h("div", { class: "ch-row__title" }, it.label || "Untitled"),
+        h("div", { class: "ch-row__title" }, it.title || it.label || "Untitled"),
         h("div", { class: "ch-row__sub" }, it.pct ? `Reading · ${it.pct} % through` : "Reading")
       )
     );
@@ -369,7 +371,7 @@ function chRow(m, it) {
     "button",
     { class: cls, dataset: ds, onclick: () => chOpen(it) },
     h("span", { class: "ch-row__num" }, String(it.absNum)),
-    h("span", { class: "ch-row__title" }, it.label || "Untitled"),
+    h("span", { class: "ch-row__title" }, it.title || it.label || "Untitled"),
     it.state === "read" ? h("span", { class: "ch-row__check" }, svg(ICON.check)) : null
   );
 }

@@ -18,13 +18,13 @@ import {
   progressMap, ui, bookById, seriesById, saveUi, putProgress, stashPendingProgress,
 } from "./state.js";
 import {
-  baseHref, chapterCount, chapterOrdinalFor, readableChapters, markEarlierDone,
+  baseHref, chapterCount, chapterDisplay, readableChapters, markEarlierDone,
   flatten, CHAPTER_DONE_PCT, MIN_SCROLL_PCT,
 } from "./lib/chapters.js";
 import { parseChapterLabel, stripVolume } from "./lib/text.js";
 import {
   chapterProgress, bookPercent, volumeChapterOffset, volumeNumber, nextVolume,
-  seriesVolumes, displayTitle,
+  seriesVolumes, displayTitle, absChapterNum, volumeFirstAbs, volumeLastAbs,
 } from "./reading.js";
 import { go, openInfo, openSeries } from "./router.js";
 import { addVolumeToSeries } from "./import.js";
@@ -373,8 +373,8 @@ function updateDrawerBook() {
   };
 
   const p = progressMap[lib.id];
-  const n = (p ? chapterOrdinalFor(lib, p) : 1) + volumeChapterOffset(lib);
-  const total = chapterCount(lib) + volumeChapterOffset(lib);
+  const n = p ? absChapterNum(lib, p) : volumeFirstAbs(lib);
+  const total = volumeLastAbs(lib);
   el.drawerBookSub.textContent = `${n} of ${total.toLocaleString()} · ${bookPercent(lib)} %`;
 
   // Volume switcher for a book inside a series.
@@ -422,7 +422,11 @@ function renderToc() {
   for (let i = 0; i < total; i++) {
     const entry = flatToc[i];
     const text = entry.label || "Untitled";
-    const label = inSeries ? `${offset + i + 1} · ${text}` : text;
+    // In a series the row leads with the absolute number, so strip an embedded
+    // "Chapter N:" from the title to avoid "96 · Chapter 96: Exile". Standalone
+    // rows carry no number column, so they keep the full label.
+    const { num, title } = chapterDisplay(entry, offset + i + 1);
+    const label = inSeries ? `${num} · ${title || text}` : text;
     const st = chapterProgress(currentBook, entry.href);
     const read = !!st?.done;
     const reading = !read && (st?.pct || 0) > 0;
