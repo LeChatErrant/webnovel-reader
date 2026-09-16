@@ -528,7 +528,7 @@ function showSeriesDetails(s) {
         h("span", { class: "order-row__title" }, stripVolume(b.title) || b.title),
         h("span", { class: "order-row__range" }, "")
       );
-      attachOrderDrag(handle, row, orderList, () => {
+      attachOrderDrag(row, orderList, () => {
         order = [...orderList.children].map((r) => r.dataset.id);
         reordered = true;
         updateRanges();

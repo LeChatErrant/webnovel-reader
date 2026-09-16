@@ -1135,7 +1135,17 @@ html, body {
   padding: 12px 4px;
   border-top: 1px solid var(--border-hair);
   background: var(--page);
+  /* The whole row is the drag surface. touch-action: none stops the browser
+     claiming the gesture for scrolling, and user-select: none stops a press on
+     the row's text turning into a text selection — both required for the
+     reorder drag to work on touch (Android). */
+  cursor: grab;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
 }
+.order-row.dragging { cursor: grabbing; }
 .order-row:last-child { border-bottom: 1px solid var(--border-hair); }
 .order-row.dragging { opacity: 0.85; background: var(--surface); border-radius: 8px; border-color: transparent; }
 .order-row__handle {

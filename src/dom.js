@@ -194,8 +194,16 @@ export function attachLongPress(node, { onLongPress, onTap, canStart = () => tru
 // Pointer-based drag reorder for one handle. Uses pointer capture so the drag
 // survives the finger leaving the handle, and reorders DOM live; the caller
 // syncs its model on each move.
-export function attachOrderDrag(handle, row, list, onReorder) {
-  handle.addEventListener("pointerdown", (e) => {
+// Reorder a list by dragging its rows. The whole `row` is the drag surface (the
+// grip glyph is only an affordance) — on a phone the 18px handle is far too easy
+// to miss, and a press that lands on the row's text was being read as a text
+// selection instead of a drag. The row must carry `touch-action: none` (so the
+// browser doesn't claim the gesture for scrolling) and `user-select: none` (so
+// it never selects text) for this to work on touch.
+export function attachOrderDrag(row, list, onReorder) {
+  row.addEventListener("pointerdown", (e) => {
+    // Ignore secondary mouse buttons; let primary touch/mouse start a drag.
+    if (e.button && e.button !== 0) return;
     e.preventDefault();
     row.classList.add("dragging");
     const move = (ev) => {
@@ -206,18 +214,18 @@ export function attachOrderDrag(handle, row, list, onReorder) {
       onReorder();
     };
     const up = () => {
-      try { handle.releasePointerCapture(e.pointerId); } catch { /* ignore */ }
-      handle.removeEventListener("pointermove", move);
-      handle.removeEventListener("pointerup", up);
-      handle.removeEventListener("pointercancel", up);
+      try { row.releasePointerCapture(e.pointerId); } catch { /* ignore */ }
+      row.removeEventListener("pointermove", move);
+      row.removeEventListener("pointerup", up);
+      row.removeEventListener("pointercancel", up);
       row.classList.remove("dragging");
     };
-    handle.addEventListener("pointermove", move);
-    handle.addEventListener("pointerup", up);
-    handle.addEventListener("pointercancel", up);
-    // Pointer capture keeps the drag alive when the finger leaves the handle.
-    // It can throw for a stale/synthetic pointer id — never let that abort the
-    // drag we just wired up.
-    try { handle.setPointerCapture(e.pointerId); } catch { /* ignore */ }
+    row.addEventListener("pointermove", move);
+    row.addEventListener("pointerup", up);
+    row.addEventListener("pointercancel", up);
+    // Pointer capture keeps the drag alive when the finger leaves the row. It can
+    // throw for a stale/synthetic pointer id — never let that abort the drag we
+    // just wired up.
+    try { row.setPointerCapture(e.pointerId); } catch { /* ignore */ }
   });
 }
