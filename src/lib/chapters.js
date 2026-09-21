@@ -48,6 +48,12 @@ export function readableChapters(entries) {
 // Total boilerplate entries anywhere in the book (front or back matter).
 export const frontMatterCount = (book) => (book?.chapters || []).filter((e) => isFrontMatter(e.label)).length;
 
+// The boilerplate entries themselves (cover, contents, notes, afterword…), in
+// spine order. Hidden from the reader flow and counts, but still real pages in
+// the epub — the Chapters screen surfaces them in an "extras" group so every
+// page stays reachable.
+export const frontMatterEntries = (book) => (book?.chapters || []).filter((e) => isFrontMatter(e.label));
+
 // Boilerplate entries that *lead* the TOC (sit before the first real chapter).
 // This — not the total — is the offset for turning a spine index into a
 // readable-TOC ordinal, so a trailing notes page never shifts the count.

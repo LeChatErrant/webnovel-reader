@@ -10,7 +10,7 @@
 // =========================================================================
 import { el, h, svg, ICON } from "./dom.js";
 import { progressMap, ui, bookById, seriesById, saveUi } from "./state.js";
-import { readableChapters, chapterOrdinalFor, chapterDisplay, scrollAnchorFor, previewWindow } from "./lib/chapters.js";
+import { readableChapters, frontMatterEntries, chapterOrdinalFor, chapterDisplay, scrollAnchorFor, previewWindow } from "./lib/chapters.js";
 import {
   chapterProgress, bookPercent, seriesVolumes, currentVolume, volumeChapterOffset,
   volumeNumber, displayTitle,
@@ -20,6 +20,7 @@ import { go } from "./router.js";
 
 let chQuery = ""; // current search string (screen-local)
 let chVolFilter = null; // volume id to filter to, or null for the whole story
+let chExtrasOpen = false; // "Notes & extras" group expanded? (screen-local)
 let chBackObserver = null; // watches the current row to toggle the "Back to ch." pill
 let chEls = null; // live DOM refs while the screen is mounted
 
@@ -56,6 +57,7 @@ export function chaptersModel(kind, id) {
     const curP = cur ? progressMap[cur.id] : null;
     const curLocal = cur && curP ? chapterOrdinalFor(cur, curP) - 1 : -1;
     const items = [];
+    const extras = [];
     for (const vol of vols) {
       const chs = readableChapters(vol.chapters || []);
       const offset = volumeChapterOffset(vol);
@@ -66,10 +68,13 @@ export function chaptersModel(kind, id) {
         const { num, title } = chapterDisplay(e, offset + i + 1);
         items.push({ absNum: num, title, label: e.label, href: e.href, bookId: vol.id, localIndex: i, state, pct });
       });
+      for (const e of frontMatterEntries(vol)) {
+        extras.push({ title: (e.label || "").trim() || "Untitled", label: e.label, href: e.href, bookId: vol.id, volNum: volumeNumber(s, vol) });
+      }
     }
     const curItem = items.find((it) => it.state === "current");
     return {
-      kind, id, series: s, vols, book: null, title: s.name, items,
+      kind, id, series: s, vols, book: null, title: s.name, items, extras,
       currentAbs: curItem ? curItem.absNum : null,
       currentPercent: curItem ? curItem.pct : undefined,
       // Where the Chapters screen pre-scrolls: the current (resume) chapter when
@@ -89,9 +94,12 @@ export function chaptersModel(kind, id) {
     const { num, title } = chapterDisplay(e, i + 1);
     return { absNum: num, title, label: e.label, href: e.href, bookId: b.id, localIndex: i, state, pct };
   });
+  const extras = frontMatterEntries(b).map((e) => ({
+    title: (e.label || "").trim() || "Untitled", label: e.label, href: e.href, bookId: b.id, volNum: null,
+  }));
   const curItem = items.find((it) => it.state === "current");
   return {
-    kind, id, series: null, vols: null, book: b, title: displayTitle(b), items,
+    kind, id, series: null, vols: null, book: b, title: displayTitle(b), items, extras,
     currentAbs: curItem ? curItem.absNum : null,
     currentPercent: curItem ? curItem.pct : undefined,
     scrollAnchorAbs: scrollAnchorFor(items, curItem, b.id, curLocal),
@@ -211,6 +219,7 @@ export function renderChapters(kind, id, volId) {
   }
   if (volId !== undefined) chVolFilter = volId;
   chQuery = "";
+  chExtrasOpen = false;
 
   // Bar — back · title + context · sort toggle.
   const context = h("div", { class: "ch-bar__context" }, chContextLine(m));
@@ -300,13 +309,24 @@ function chFilteredItems(m) {
   return items;
 }
 
+function chFilteredExtras(m) {
+  let ex = m.extras || [];
+  if (chVolFilter) ex = ex.filter((it) => it.bookId === chVolFilter);
+  if (chQuery) {
+    const q = chQuery.toLowerCase();
+    ex = ex.filter((it) => (it.label || "").toLowerCase().includes(q));
+  }
+  return ex;
+}
+
 function updateChapterList(m, scrollToCurrent = false) {
   const list = chEls.list;
   list.innerHTML = "";
   const items = chFilteredItems(m);
+  const extras = chFilteredExtras(m);
 
-  if (!items.length) {
-    list.append(h("div", { class: "ch-empty" }, `No chapters match “${chQuery}”.`));
+  if (!items.length && !extras.length) {
+    list.append(h("div", { class: "ch-empty" }, chQuery ? `Nothing matches “${chQuery}”.` : "No chapters."));
     setupBackPill(m);
     return;
   }
@@ -314,7 +334,10 @@ function updateChapterList(m, scrollToCurrent = false) {
   const dir = chSortDir(m.kind, m.id);
   const filterCount = (chVolFilter ? m.items.filter((it) => it.bookId === chVolFilter) : m.items).length;
 
-  if (chQuery) {
+  if (!items.length && chQuery) {
+    // Only extras matched the search — say so, then fall through to render them.
+    list.append(h("div", { class: "ch-empty" }, `No chapters match “${chQuery}”.`));
+  } else if (chQuery) {
     // Search results are a flat list — no range headers over a sparse set.
     const ordered = dir === "desc" ? [...items].reverse() : items;
     for (const it of ordered) list.append(chRow(m, it));
@@ -345,8 +368,48 @@ function updateChapterList(m, scrollToCurrent = false) {
     }
   }
 
+  if (extras.length) renderExtras(m, extras);
+
   setupBackPill(m);
   if (scrollToCurrent) requestAnimationFrame(() => scrollToCurrentRow());
+}
+
+// The "Notes & extras" group pinned at the bottom of the list: the epub's
+// non-chapter pages (cover, contents, author's notes, afterword…), hidden from
+// the main flow but reachable here. Collapsed by default; a search that matches
+// an extra forces it open so the hit is visible.
+function renderExtras(m, extras) {
+  const open = chExtrasOpen || !!chQuery;
+  const showVol = m.kind === "series" && !chVolFilter;
+  const body = h("div", { class: "ch-extras__body" }, ...extras.map((it) => chExtraRow(it, showVol)));
+  const head = h(
+    "button",
+    { class: "ch-extras__head", "aria-expanded": String(open) },
+    h("span", { class: "ch-extras__chev" }, svg(ICON.chevron)),
+    h("span", { class: "ch-extras__label" }, "Notes & extras"),
+    h("span", { class: "ch-extras__count" }, String(extras.length))
+  );
+  const group = h("div", { class: "ch-extras" + (open ? " ch-extras--open" : "") }, head, body);
+  head.onclick = () => {
+    chExtrasOpen = !group.classList.contains("ch-extras--open");
+    group.classList.toggle("ch-extras--open", chExtrasOpen);
+    head.setAttribute("aria-expanded", String(chExtrasOpen));
+  };
+  chEls.list.append(group);
+}
+
+function chExtraRow(it, showVol) {
+  return h(
+    "button",
+    { class: "ch-row ch-row--extra", onclick: () => openBook(it.bookId, { startHref: it.href }) },
+    h("span", { class: "ch-row__num ch-row__num--extra" }, "·"),
+    h(
+      "span",
+      { class: "ch-row__title-wrap" },
+      h("div", { class: "ch-row__title" }, it.title),
+      showVol && it.volNum ? h("div", { class: "ch-row__sub" }, "Vol. " + it.volNum) : null
+    )
+  );
 }
 
 function chRow(m, it) {
@@ -427,4 +490,5 @@ export function teardownChapters() {
   chEls = null;
   chQuery = "";
   chVolFilter = null;
+  chExtrasOpen = false;
 }

@@ -1491,6 +1491,41 @@ html, body {
 /* Empty search result — one line, no illustration. */
 .ch-empty { padding: 22px 20px; font: 300 14.5px/1.6 var(--font-serif); color: var(--text-dim); }
 
+/* "Notes & extras" group — the epub's non-chapter pages, collapsed by default
+   and set apart from the chapter list so it stays clean. */
+.ch-extras { border-top: 1px solid var(--border-hair); }
+.ch-extras__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 13px 20px;
+  border: 0;
+  background: var(--surface-alt);
+  text-align: left;
+  cursor: pointer;
+}
+.ch-extras__chev {
+  flex: none;
+  display: inline-flex;
+  color: var(--text-dimmest);
+  transition: transform 0.18s ease;
+}
+.ch-extras--open .ch-extras__chev { transform: rotate(90deg); }
+.ch-extras__label {
+  flex: 1 1 auto;
+  font: 500 10.5px var(--font-ui);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--text-dim);
+}
+.ch-extras__count { flex: none; font: 400 11.5px var(--font-ui); color: #5b636f; }
+.ch-extras__body { display: none; }
+/* Clear the floating "Back to ch." pill so the last extra row stays tappable. */
+.ch-extras--open .ch-extras__body { display: block; padding-bottom: 72px; }
+.ch-row--extra .ch-row__num--extra { color: var(--text-dimmest); font-size: 16px; }
+.ch-row--extra .ch-row__title { color: var(--text-secondary); white-space: normal; }
+
 /* Floating "Back to ch. N" pill over a footer fade. */
 .ch-backpill-wrap {
   position: absolute;

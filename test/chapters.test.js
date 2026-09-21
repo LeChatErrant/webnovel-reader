@@ -4,6 +4,7 @@ import {
   isFrontMatter,
   readableChapters,
   frontMatterCount,
+  frontMatterEntries,
   leadingFrontMatterCount,
   chapterCount,
   chapterOrdinalFor,
@@ -80,6 +81,16 @@ describe("frontMatterCount", () => {
   it("counts all boilerplate, front and back", () => {
     const book = { chapters: [ch("Cover", "c"), ch("Contents", "t"), ch("Chapter 1", "1"), ch("Notes", "n")] };
     expect(frontMatterCount(book)).toBe(3);
+  });
+});
+
+describe("frontMatterEntries", () => {
+  it("returns the boilerplate entries, front and back, in order — the 'Notes & extras' group", () => {
+    const book = { chapters: [ch("Cover", "c"), ch("Contents", "t"), ch("Chapter 1", "1"), ch("Notes", "n")] };
+    expect(frontMatterEntries(book).map((e) => e.label)).toEqual(["Cover", "Contents", "Notes"]);
+  });
+  it("is empty when every entry is a real chapter", () => {
+    expect(frontMatterEntries({ chapters: [ch("Chapter 1", "1"), ch("Chapter 5: Notes", "2")] })).toEqual([]);
   });
 });
 
