@@ -46,6 +46,7 @@ let currentHref = null;
 let resumeDismissed = new Set();
 let resumeChipEl = null;
 let resumeChipHref = null;
+let resumeChipTargetPct = null; // the % the chip points to; once reading passes it the chip retires
 // Where the current chapter first appeared, so we can measure how far the reader
 // scrolled from there (see MIN_SCROLL_PCT) before crediting any progress.
 let chapterEntryBaseline = { href: null, pct: 0 };
@@ -345,6 +346,13 @@ export async function renderReader(lib, startHref = null) {
     currentHref = location?.start?.href || null;
     // A move to a different chapter retires a resume chip meant for the old one.
     if (resumeChipHref && baseHref(currentHref) !== resumeChipHref) hideResumeChip();
+    // Same chapter: once reading reaches (or passes) the spot the chip points
+    // to, you're no longer "behind" it, so the chip retires itself.
+    else if (resumeChipHref && resumeChipTargetPct != null) {
+      const disp = location?.start?.displayed;
+      const rawPct = disp && disp.total ? Math.round((disp.page / disp.total) * 100) : null;
+      if (rawPct != null && rawPct >= resumeChipTargetPct) hideResumeChip();
+    }
     // Re-render the drawer list so read-state and the highlight track the move.
     renderToc();
     updateChapterTitle(currentHref);
@@ -569,6 +577,7 @@ function maybeShowResumeChip(href) {
   }
   hideResumeChip();
   resumeChipHref = key;
+  resumeChipTargetPct = st.pct;
   const goBtn = h(
     "button",
     {
@@ -604,6 +613,7 @@ function hideResumeChip() {
   if (resumeChipEl) resumeChipEl.remove();
   resumeChipEl = null;
   resumeChipHref = null;
+  resumeChipTargetPct = null;
 }
 function updateChapterTitle(href) {
   const label = href ? chapterLabelFor(href) : "";
