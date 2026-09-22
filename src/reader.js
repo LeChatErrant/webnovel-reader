@@ -35,11 +35,6 @@ let currentBook = null; // the library book being read
 let flatToc = [];
 let tocExtras = []; // the book's hidden pages (cover, contents, notes…), shown in a drawer group
 let tocExtrasOpen = false; // is that drawer group expanded?
-// The full TOC in the epub's own order — readable chapters AND the hidden
-// extras in their real positions (front matter first, trailing notes last).
-// prev/next and the end-of-page card step over this, so navigation reaches the
-// extras without ever assuming they sit contiguously.
-let navList = [];
 let currentHref = null;
 // Per-chapter resume chip: the chapters the reader has dismissed it for this
 // session, plus the live chip element and the chapter it belongs to.
@@ -285,7 +280,6 @@ export async function renderReader(lib, startHref = null) {
   // Populate the drawer (current book + chapters) immediately from stored
   // metadata, so the menu is usable the moment it opens — independent of how
   // long epub.js takes to lay out the first chapter.
-  navList = lib.chapters || [];
   flatToc = readableChapters(lib.chapters || []);
   tocExtras = frontMatterEntries(lib);
   tocExtrasOpen = false;
@@ -335,7 +329,6 @@ export async function renderReader(lib, startHref = null) {
   // Refine the chapter list once the live navigation resolves (accurate hrefs).
   book.loaded.navigation.then((nav) => {
     const full = flatten(nav.toc);
-    navList = full;
     flatToc = readableChapters(full);
     tocExtras = full.filter((e) => !flatToc.includes(e));
     renderToc();
@@ -540,21 +533,32 @@ function chapterLabelFor(href) {
   for (const e of tocExtras) if (baseHref(e.href) === current) return (e.label || "").trim();
   return null;
 }
-// The reader's index in the full navigation list (chapters + extras, in book
-// order), from the live reading position.
-function currentNavIndex() {
-  const cur = baseHref(currentHref);
-  return cur ? navList.findIndex((e) => baseHref(e.href) === cur) : -1;
+// Which ordered list stepping stays within for a given page: the readable
+// chapters, or — only once you've manually opened one — the extras. Keeping the
+// two apart is what keeps the extras out of the normal reading flow: prev/next
+// on a chapter never wanders into the notes, and prev/next on an extra stays
+// among the extras.
+function navContextFor(href) {
+  const cur = baseHref(href);
+  // Readable chapters win when a spine file holds both a chapter and an extra
+  // (e.g. a licence appended to the last chapter): such a page reads as a
+  // chapter, so its prev/next stays among the chapters.
+  if (flatToc.some((e) => baseHref(e.href) === cur)) return flatToc;
+  if (tocExtras.some((e) => baseHref(e.href) === cur)) return tocExtras;
+  return flatToc;
 }
-// Move one entry back/forward and open it at its top. Steps over navList, so
-// the extras (notes, afterword, and any front matter) are reachable in their
-// real order. In scrolled-doc flow rendition.prev() lands at the *end* of the
-// previous section, so stepping by href instead keeps "previous" and "next"
-// symmetric — both start you at the beginning of the target.
+// Move one entry back/forward and open it at its top, staying within the current
+// context (chapters, or the extras once you're in them). In scrolled-doc flow
+// rendition.prev() lands at the *end* of the previous section, so stepping by
+// href instead keeps "previous" and "next" symmetric — both start you at the
+// beginning of the target.
 export function goChapter(delta) {
-  if (!rendition || !navList.length) return;
-  const i = currentNavIndex();
-  const target = navList[(i < 0 ? 0 : i) + delta];
+  if (!rendition) return;
+  const list = navContextFor(currentHref);
+  if (!list.length) return;
+  const cur = baseHref(currentHref);
+  const i = list.findIndex((e) => baseHref(e.href) === cur);
+  const target = list[(i < 0 ? 0 : i) + delta];
   if (target) displayChapterTop(target.href);
 }
 // Open a chapter at its top (a deliberate jump from the drawer, the chapter
@@ -661,32 +665,35 @@ function injectChapterNav(contents) {
   // so resolve from this document's own spine section rather than currentHref.
   const offset = currentBook ? volumeChapterOffset(currentBook) : 0;
   const thisHref = book?.spine?.get?.(idx)?.href || null;
-  // Step over the full nav list (chapters + extras, in book order) so the next
-  // entry can be a trailing notes page as naturally as a chapter — the extras
-  // aren't assumed to be contiguous with, or after, the chapters.
-  const navIdx = thisHref ? navList.findIndex((e) => baseHref(e.href) === baseHref(thisHref)) : -1;
-  const curEntry = navIdx >= 0 ? navList[navIdx] : null;
-  const nextEntry = navIdx >= 0 ? navList[navIdx + 1] || null : null;
-  const curIsExtra = !!(curEntry && isFrontMatter(curEntry.label));
-  const nextIsExtra = !!(nextEntry && isFrontMatter(nextEntry.label));
+  // Stay within one context: on a real chapter the "next" is the next readable
+  // chapter (so the last chapter still ends on "End of book"/the volume
+  // boundary, never on an extra); on an extra — reached only by opening it
+  // yourself — the "next" is the next extra. This keeps the notes hidden from
+  // the normal reading flow while still letting you page through them once in.
+  // A page that is a readable chapter reads as one even if an extra fragment
+  // shares its file, so chapter membership wins.
+  const inChapter = !!(thisHref && flatToc.some((e) => baseHref(e.href) === baseHref(thisHref)));
+  const curIsExtra = !inChapter && !!(thisHref && tocExtras.some((e) => baseHref(e.href) === baseHref(thisHref)));
+  const list = curIsExtra ? tocExtras : flatToc;
+  const listIdx = thisHref ? list.findIndex((e) => baseHref(e.href) === baseHref(thisHref)) : -1;
+  const curEntry = listIdx >= 0 ? list[listIdx] : null;
+  const nextEntry = listIdx >= 0 ? list[listIdx + 1] || null : null;
+  const nextIsExtra = curIsExtra; // within the extras, the next entry is an extra too
 
-  // Chapter numbers come from the readable list only — an extra never gets a
-  // number, and the positional fallback is counted over readable chapters so it
-  // never drifts. Prefer the label's own embedded number (matches the top bar).
-  const readIdxOf = (e) => (e ? flatToc.findIndex((x) => baseHref(x.href) === baseHref(e.href)) : -1);
+  // Chapter numbers apply to readable chapters only; an extra never gets one.
+  // Prefer the label's own embedded number (matches the top bar), with a
+  // positional fallback counted over readable chapters so it never drifts.
   const numFor = (e) => {
     if (!e || isFrontMatter(e.label)) return null;
     const parsed = parseChapterLabel(e.label);
-    const ri = readIdxOf(e);
+    const ri = flatToc.findIndex((x) => baseHref(x.href) === baseHref(e.href));
     return parsed.num ?? (ri >= 0 ? ri + 1 + offset : null);
   };
   const curNum = numFor(curEntry);
   const nextParsed = nextEntry ? parseChapterLabel(nextEntry.label) : { num: null, title: "" };
   const nextNum = numFor(nextEntry);
-  // The true end of the book/volume is the last entry in the nav list — which,
-  // when the book has trailing extras, is the notes page, not the last chapter.
-  // Basing this on the nav list (not the spine's atEnd) is what lets the last
-  // chapter offer a "next" into the extras.
+  // The end of the current context — the last readable chapter (→ End of
+  // book/volume boundary) or the last extra (→ just its own heading).
   const lastChapter = !nextEntry;
 
   const inSeries = currentBook?.seriesId && seriesById(currentBook.seriesId);
@@ -698,15 +705,15 @@ function injectChapterNav(contents) {
   label.className = "chapter-end__label";
   const labelText = doc.createElement("span");
   labelText.className = "chapter-end__label-text";
-  labelText.textContent = lastChapter
+  labelText.textContent = curIsExtra
+    ? (curEntry?.label || "").trim() || "Notes"
+    : lastChapter
     ? (inSeries ? "End of Vol. " + volumeNumber(seriesById(currentBook.seriesId), currentBook) : "End of book")
-    : curIsExtra
-    ? (curEntry.label || "").trim()
     : "End of chapter" + (curNum ? " " + curNum : "");
   label.appendChild(labelText);
   wrap.appendChild(label);
 
-  if (lastChapter && inSeries) {
+  if (lastChapter && inSeries && !curIsExtra) {
     // Volume boundary card — continue into the next volume of the series.
     const next = currentBook ? nextVolume(currentBook) : null;
     const card = doc.createElement("div");
