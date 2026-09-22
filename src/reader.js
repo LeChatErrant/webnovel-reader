@@ -18,7 +18,7 @@ import {
   progressMap, ui, bookById, seriesById, saveUi, putProgress, stashPendingProgress,
 } from "./state.js";
 import {
-  baseHref, chapterCount, chapterDisplay, readableChapters, frontMatterEntries, markEarlierDone,
+  baseHref, chapterCount, chapterDisplay, readableChapters, frontMatterEntries, isFrontMatter, markEarlierDone,
   flatten, CHAPTER_DONE_PCT, MIN_SCROLL_PCT,
 } from "./lib/chapters.js";
 import { parseChapterLabel, stripVolume } from "./lib/text.js";
@@ -35,6 +35,11 @@ let currentBook = null; // the library book being read
 let flatToc = [];
 let tocExtras = []; // the book's hidden pages (cover, contents, notes…), shown in a drawer group
 let tocExtrasOpen = false; // is that drawer group expanded?
+// The full TOC in the epub's own order — readable chapters AND the hidden
+// extras in their real positions (front matter first, trailing notes last).
+// prev/next and the end-of-page card step over this, so navigation reaches the
+// extras without ever assuming they sit contiguously.
+let navList = [];
 let currentHref = null;
 // Per-chapter resume chip: the chapters the reader has dismissed it for this
 // session, plus the live chip element and the chapter it belongs to.
@@ -279,6 +284,7 @@ export async function renderReader(lib, startHref = null) {
   // Populate the drawer (current book + chapters) immediately from stored
   // metadata, so the menu is usable the moment it opens — independent of how
   // long epub.js takes to lay out the first chapter.
+  navList = lib.chapters || [];
   flatToc = readableChapters(lib.chapters || []);
   tocExtras = frontMatterEntries(lib);
   tocExtrasOpen = false;
@@ -328,6 +334,7 @@ export async function renderReader(lib, startHref = null) {
   // Refine the chapter list once the live navigation resolves (accurate hrefs).
   book.loaded.navigation.then((nav) => {
     const full = flatten(nav.toc);
+    navList = full;
     flatToc = readableChapters(full);
     tocExtras = full.filter((e) => !flatToc.includes(e));
     renderToc();
@@ -521,21 +528,25 @@ function highlightToc(href) {
 function chapterLabelFor(href) {
   const current = baseHref(href);
   for (const e of flatToc) if (baseHref(e.href) === current) return e.label || "";
+  // A hidden extra page (notes, contents…) still names itself in the top bar.
+  for (const e of tocExtras) if (baseHref(e.href) === current) return (e.label || "").trim();
   return null;
 }
-// The reader's index in the readable TOC, from the live reading position.
-function currentTocIndex() {
+// The reader's index in the full navigation list (chapters + extras, in book
+// order), from the live reading position.
+function currentNavIndex() {
   const cur = baseHref(currentHref);
-  return cur ? flatToc.findIndex((e) => baseHref(e.href) === cur) : -1;
+  return cur ? navList.findIndex((e) => baseHref(e.href) === cur) : -1;
 }
-// Move one chapter back/forward and open it at its top. In scrolled-doc flow
-// rendition.prev() lands at the *end* of the previous section, so stepping by
-// TOC href instead keeps "previous" and "next" symmetric — both start you at
-// the beginning of the target chapter.
+// Move one entry back/forward and open it at its top. Steps over navList, so
+// the extras (notes, afterword, and any front matter) are reachable in their
+// real order. In scrolled-doc flow rendition.prev() lands at the *end* of the
+// previous section, so stepping by href instead keeps "previous" and "next"
+// symmetric — both start you at the beginning of the target.
 export function goChapter(delta) {
-  if (!rendition || !flatToc.length) return;
-  const i = currentTocIndex();
-  const target = flatToc[(i < 0 ? 0 : i) + delta];
+  if (!rendition || !navList.length) return;
+  const i = currentNavIndex();
+  const target = navList[(i < 0 ? 0 : i) + delta];
   if (target) displayChapterTop(target.href);
 }
 // Open a chapter at its top (a deliberate jump from the drawer, the chapter
@@ -633,25 +644,40 @@ function injectReaderTheme(contents) {
 function injectChapterNav(contents) {
   const doc = contents.document;
   if (!doc?.body || doc.querySelector(".chapter-end")) return;
-  const total = book?.spine?.spineItems?.length || 0;
   const idx = typeof contents.sectionIndex === "number" ? contents.sectionIndex : -1;
-  const atEnd = total > 0 && idx >= total - 1;
 
   // Locate this chapter in the readable TOC so we can name/number the *next*
   // one. Content-hook time: currentHref still points at the outgoing chapter,
   // so resolve from this document's own spine section rather than currentHref.
   const offset = currentBook ? volumeChapterOffset(currentBook) : 0;
   const thisHref = book?.spine?.get?.(idx)?.href || null;
-  const tocIdx = thisHref ? flatToc.findIndex((e) => baseHref(e.href) === baseHref(thisHref)) : -1;
-  const nextEntry = tocIdx >= 0 ? flatToc[tocIdx + 1] || null : null;
-  // Prefer the chapter's own embedded number (matches the top bar) over the
-  // positional ordinal, which drifts when the book has front matter.
-  const curParsed = tocIdx >= 0 ? parseChapterLabel(flatToc[tocIdx]?.label) : { num: null, title: "" };
-  const curNum = curParsed.num ?? (tocIdx >= 0 ? tocIdx + 1 + offset : null);
+  // Step over the full nav list (chapters + extras, in book order) so the next
+  // entry can be a trailing notes page as naturally as a chapter — the extras
+  // aren't assumed to be contiguous with, or after, the chapters.
+  const navIdx = thisHref ? navList.findIndex((e) => baseHref(e.href) === baseHref(thisHref)) : -1;
+  const curEntry = navIdx >= 0 ? navList[navIdx] : null;
+  const nextEntry = navIdx >= 0 ? navList[navIdx + 1] || null : null;
+  const curIsExtra = !!(curEntry && isFrontMatter(curEntry.label));
+  const nextIsExtra = !!(nextEntry && isFrontMatter(nextEntry.label));
+
+  // Chapter numbers come from the readable list only — an extra never gets a
+  // number, and the positional fallback is counted over readable chapters so it
+  // never drifts. Prefer the label's own embedded number (matches the top bar).
+  const readIdxOf = (e) => (e ? flatToc.findIndex((x) => baseHref(x.href) === baseHref(e.href)) : -1);
+  const numFor = (e) => {
+    if (!e || isFrontMatter(e.label)) return null;
+    const parsed = parseChapterLabel(e.label);
+    const ri = readIdxOf(e);
+    return parsed.num ?? (ri >= 0 ? ri + 1 + offset : null);
+  };
+  const curNum = numFor(curEntry);
   const nextParsed = nextEntry ? parseChapterLabel(nextEntry.label) : { num: null, title: "" };
-  const nextNum = nextEntry ? (nextParsed.num ?? tocIdx + 2 + offset) : null;
-  // The last chapter of this book/volume — no in-book "next".
-  const lastChapter = atEnd || !nextEntry;
+  const nextNum = numFor(nextEntry);
+  // The true end of the book/volume is the last entry in the nav list — which,
+  // when the book has trailing extras, is the notes page, not the last chapter.
+  // Basing this on the nav list (not the spine's atEnd) is what lets the last
+  // chapter offer a "next" into the extras.
+  const lastChapter = !nextEntry;
 
   const inSeries = currentBook?.seriesId && seriesById(currentBook.seriesId);
 
@@ -664,6 +690,8 @@ function injectChapterNav(contents) {
   labelText.className = "chapter-end__label-text";
   labelText.textContent = lastChapter
     ? (inSeries ? "End of Vol. " + volumeNumber(seriesById(currentBook.seriesId), currentBook) : "End of book")
+    : curIsExtra
+    ? (curEntry.label || "").trim()
     : "End of chapter" + (curNum ? " " + curNum : "");
   label.appendChild(labelText);
   wrap.appendChild(label);
@@ -701,12 +729,19 @@ function injectChapterNav(contents) {
     }
     wrap.appendChild(card);
   } else if (!lastChapter) {
-    // Clean single next-chapter card: a quiet kicker over the next chapter's
-    // number + title, with a chevron. (Previous is intentionally omitted — the
-    // top bar already carries chapter-back navigation.)
+    // Clean single next card: a quiet kicker over the next entry's number +
+    // title, with a chevron. (Previous is intentionally omitted — the top bar
+    // already carries back navigation.) When the next entry is an extra (notes,
+    // afterword…) it shows under a "Notes & extras" kicker with no number.
     const card = doc.createElement("button");
     card.className = "cn-card";
-    card.setAttribute("aria-label", "Next chapter" + (nextNum != null ? " " + nextNum : "") + (nextParsed.title ? ", " + nextParsed.title : ""));
+    const nextRaw = (nextEntry.label || "").trim();
+    card.setAttribute(
+      "aria-label",
+      nextIsExtra
+        ? "Next: " + (nextRaw || "extra")
+        : "Next chapter" + (nextNum != null ? " " + nextNum : "") + (nextParsed.title ? ", " + nextParsed.title : "")
+    );
     card.addEventListener("click", () => displayChapterTop(nextEntry.href));
 
     // Left column: kicker over the number + title. The chevron is a sibling of
@@ -716,20 +751,21 @@ function injectChapterNav(contents) {
 
     const kicker = doc.createElement("div");
     kicker.className = "cn-card__kicker";
-    kicker.textContent = "Next chapter";
+    kicker.textContent = nextIsExtra ? "Notes & extras" : "Next chapter";
 
     const main = doc.createElement("div");
     main.className = "cn-card__main";
-    if (nextNum != null) {
+    if (!nextIsExtra && nextNum != null) {
       const num = doc.createElement("span");
       num.className = "cn-card__num";
       num.textContent = String(nextNum);
       main.appendChild(num);
     }
     // Use the parsed title so a "Chapter N:" prefix isn't repeated next to the
-    // number; fall back to the raw label only for bare-title books (no embedded
-    // number). A numbered-but-titleless chapter shows just its number.
-    const titleText = nextParsed.title || (nextParsed.num == null ? (nextEntry.label || "").trim() : "");
+    // number; fall back to the raw label for bare-title books and for extras
+    // (which have no embedded number). A numbered-but-titleless chapter shows
+    // just its number.
+    const titleText = nextIsExtra ? nextRaw : (nextParsed.title || (nextParsed.num == null ? nextRaw : ""));
     if (titleText) {
       const title = doc.createElement("span");
       title.className = "cn-card__title";
