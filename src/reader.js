@@ -18,7 +18,7 @@ import {
   progressMap, ui, bookById, seriesById, saveUi, putProgress, stashPendingProgress,
 } from "./state.js";
 import {
-  baseHref, chapterCount, chapterDisplay, readableChapters, markEarlierDone,
+  baseHref, chapterCount, chapterDisplay, readableChapters, frontMatterEntries, markEarlierDone,
   flatten, CHAPTER_DONE_PCT, MIN_SCROLL_PCT,
 } from "./lib/chapters.js";
 import { parseChapterLabel, stripVolume } from "./lib/text.js";
@@ -33,6 +33,8 @@ let book = null; // live epub.js Book
 let rendition = null;
 let currentBook = null; // the library book being read
 let flatToc = [];
+let tocExtras = []; // the book's hidden pages (cover, contents, notes…), shown in a drawer group
+let tocExtrasOpen = false; // is that drawer group expanded?
 let currentHref = null;
 // Per-chapter resume chip: the chapters the reader has dismissed it for this
 // session, plus the live chip element and the chapter it belongs to.
@@ -278,6 +280,8 @@ export async function renderReader(lib, startHref = null) {
   // metadata, so the menu is usable the moment it opens — independent of how
   // long epub.js takes to lay out the first chapter.
   flatToc = readableChapters(lib.chapters || []);
+  tocExtras = frontMatterEntries(lib);
+  tocExtrasOpen = false;
   renderToc();
   updateDrawerBook();
 
@@ -323,7 +327,9 @@ export async function renderReader(lib, startHref = null) {
 
   // Refine the chapter list once the live navigation resolves (accurate hrefs).
   book.loaded.navigation.then((nav) => {
-    flatToc = readableChapters(flatten(nav.toc));
+    const full = flatten(nav.toc);
+    flatToc = readableChapters(full);
+    tocExtras = full.filter((e) => !flatToc.includes(e));
     renderToc();
     updateChapterTitle(currentHref);
   });
@@ -450,7 +456,45 @@ function renderToc() {
     });
     el.tocList.append(h("li", null, btn));
   }
+  renderTocExtras();
   highlightToc(currentHref);
+}
+
+// The drawer's "Notes & extras" group — the epub's hidden pages (cover,
+// contents, notes, afterword…), collapsed at the bottom so the chapter list
+// stays clean while every page stays reachable mid-read. Mirrors the group on
+// the full Chapters screen.
+function renderTocExtras() {
+  if (!tocExtras.length) return;
+  const head = h(
+    "button",
+    { class: "toc-extras__head" + (tocExtrasOpen ? " toc-extras--open" : ""), "aria-expanded": String(tocExtrasOpen) },
+    h("span", { class: "toc-extras__chev" }, svg(ICON.chevron)),
+    h("span", { class: "toc-extras__label" }, "Notes & extras"),
+    h("span", { class: "toc-extras__count" }, String(tocExtras.length))
+  );
+  const rowLis = tocExtras.map((e) => {
+    const b = h(
+      "button",
+      { dataset: { href: e.href }, class: "toc-item toc-item--extra" },
+      h("span", { class: "toc-item__label" }, (e.label || "Untitled").trim())
+    );
+    b.addEventListener("click", () => {
+      displayChapterTop(e.href);
+      closeDrawer();
+    });
+    const li = h("li", null, b);
+    li.hidden = !tocExtrasOpen;
+    return li;
+  });
+  head.addEventListener("click", () => {
+    tocExtrasOpen = !tocExtrasOpen;
+    head.classList.toggle("toc-extras--open", tocExtrasOpen);
+    head.setAttribute("aria-expanded", String(tocExtrasOpen));
+    rowLis.forEach((li) => (li.hidden = !tocExtrasOpen));
+  });
+  el.tocList.append(h("li", { class: "toc-extras" }, head));
+  rowLis.forEach((li) => el.tocList.append(li));
 }
 // How many chapters of already-read context to keep above the current one when
 // the drawer settles, so the current chapter always lands near the top with a

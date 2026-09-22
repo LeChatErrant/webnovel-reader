@@ -763,6 +763,22 @@ html, body {
 .toc-list .depth-1 { padding-left: 34px; font-size: 13px; opacity: 0.92; }
 .toc-list .depth-2 { padding-left: 50px; font-size: 13px; opacity: 0.85; }
 
+/* Drawer "Notes & extras" group — the epub's hidden pages, collapsed by
+   default and set apart from the chapter list with a top hairline. */
+.toc-list .toc-extras { border-top: 1px solid var(--border-hair); margin-top: 4px; }
+.toc-list .toc-extras__head { gap: 8px; }
+.toc-list .toc-extras__chev { flex: none; display: inline-flex; color: var(--text-dimmest); transition: transform 0.18s ease; }
+.toc-list .toc-extras__head.toc-extras--open .toc-extras__chev { transform: rotate(90deg); }
+.toc-list .toc-extras__label {
+  flex: 1 1 auto;
+  font: 500 10.5px var(--font-ui);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--text-dim);
+}
+.toc-list .toc-extras__count { flex: none; font: 400 11.5px var(--font-ui); color: #5a6270; }
+.toc-list .toc-item--extra { color: var(--text-secondary); }
+
 /* Per-chapter resume chip — a small, unobtrusive pill at the bottom of the
    reader when you reopen a chapter you left partway. Dismissible; sizes to its
    text so the label never crops on a narrow phone. */
