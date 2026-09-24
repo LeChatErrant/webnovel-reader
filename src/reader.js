@@ -217,6 +217,9 @@ function saveReadingLocation(location) {
   const rec = {
     bookId: lib.id,
     cfi: location.start.cfi || null, // book-level resume: where you are right now
+    href, // chapter the cfi/scrollTop above belong to, so resume can tell a real
+    // in-progress chapter (has a `chapters[href]` entry) from a sub-threshold
+    // dip that never crossed MIN_SCROLL_PCT (see restore gate in renderReader)
     scrollTop, // exact in-chapter offset, paired with cfi (see above)
     chapterIndex: idx,
     chapterLabel: chapterLabelFor(href) || prev?.chapterLabel || "",
@@ -309,21 +312,34 @@ export async function renderReader(lib, startHref = null) {
 
   // A chapter tapped in the Chapters screen wins; otherwise resume the saved
   // position, falling back to the first real chapter (skipping the epub's own
-  // front matter that our chrome already covers). When there is no precise CFI
-  // but we do know which chapter the reader was on (e.g. a seeded position, or
-  // progress that outlived its CFI), resume by chapter label.
+  // front matter that our chrome already covers).
   const p = progressMap[lib.id];
-  let resume = p?.cfi;
-  if (!resume && p?.chapterLabel) resume = flatToc.find((e) => e.label === p.chapterLabel)?.href;
+  // Resolve which chapter the book-level position belongs to: `p.href` covers
+  // records saved from here on; older records (saved before that field
+  // existed) are matched back to an href via their chapterLabel instead.
+  const resumeHref = p?.href || (p?.chapterLabel && flatToc.find((e) => e.label === p.chapterLabel)?.href);
+  const chapterKey = resumeHref && baseHref(resumeHref);
+  const chapterState = chapterKey && p?.chapters?.[chapterKey];
+  // Resume using the chapter's OWN tracked position (the same furthest-point
+  // cfi/scrollTop the resume chip is armed from) rather than the book-level
+  // cfi/scrollTop, which is just "wherever you last were" and gets overwritten
+  // on every relocate — including a sub-MIN_SCROLL_PCT dip that never earns a
+  // `chapters[href]` entry (and so never arms the chip either). Trusting that
+  // raw position for such a chapter would land mid-paragraph or force-scroll
+  // past its top padding, making a barely-opened chapter look squished on
+  // "Continue". A chapter with no chapters[] entry yet (or one seeded/migrated
+  // without a precise cfi) resumes by its plain href instead — like tapping it
+  // in the Chapters screen, landing at its natural top.
+  const resume = chapterState?.cfi || resumeHref;
   // A chapter tapped in the list/drawer opens at its top and offers the
-  // per-chapter resume chip; the book-level "Continue" restores the exact CFI.
+  // per-chapter resume chip; the book-level "Continue" restores the exact spot.
   if (startHref) {
     displayChapterTop(startHref);
   } else {
     const shown = rendition.display(resume || flatToc[0]?.href || undefined);
-    // Only refine when we actually restored the book-level CFI (not a fallback
-    // to a chapter href or chapter 1) and have a saved offset for it.
-    if (resume && resume === p?.cfi && p?.scrollTop > 0) restoreScrollAfter(shown, p.scrollTop);
+    if (chapterState && resume === chapterState.cfi && chapterState.scrollTop > 0) {
+      restoreScrollAfter(shown, chapterState.scrollTop);
+    }
   }
 
   // Refine the chapter list once the live navigation resolves (accurate hrefs).
