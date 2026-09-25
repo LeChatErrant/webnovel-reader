@@ -30,3 +30,28 @@ export function formatMultiplier(x) {
   if (x >= 0.1) return (Math.round(x * 100) / 100).toFixed(2) + "×";
   return "< 0.1×";
 }
+
+// Below this, even the closest-fitting reference book is a rounding error
+// ("< 0.1× The Old Man and the Sea") — not worth a comparison yet.
+const MIN_RELEVANT_RATIO = 0.01;
+
+// The single most legible comparison: the reference book whose word count is
+// closest to `words`, multiplicatively (closest to a 1:1 ratio on a log
+// scale, so "read half of" and "read double" count as equally close). Saying
+// "< 0.1× The Hobbit" or "8,000× The Great Gatsby" is technically true but
+// tells you nothing — so anything that doesn't clear the relevance floor
+// returns null and the caller shows nothing.
+export function bestComparison(words) {
+  if (!words) return null;
+  let best = null;
+  let bestDistance = Infinity;
+  for (const ref of COMPARISON_BOOKS) {
+    const ratio = words / ref.words;
+    const distance = Math.abs(Math.log(ratio));
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      best = { ref, ratio };
+    }
+  }
+  return best && best.ratio >= MIN_RELEVANT_RATIO ? best : null;
+}

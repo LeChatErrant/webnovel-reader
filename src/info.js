@@ -11,7 +11,7 @@ import { dbPut } from "./db.js";
 import { stripVolume } from "./lib/text.js";
 import { chapterCount } from "./lib/chapters.js";
 import { formatBytes, formatPublished, formatAdded, formatLang, stripHtml } from "./lib/format.js";
-import { COMPARISON_BOOKS, formatMultiplier } from "./lib/comparisons.js";
+import { COMPARISON_BOOKS, formatMultiplier, bestComparison } from "./lib/comparisons.js";
 import { ensureWordCount } from "./lib/wordcount.js";
 import {
   overrideOf, displayTitle, bookPercent, bookIsStarted, seriesVolumes, currentVolume,
@@ -324,10 +324,10 @@ function renderVolumePreview(m, volId, host) {
   if (preview) host.append(preview);
 }
 
-// Fills `host` with the recap carousel, or a "Counting words…" placeholder
-// while any target book's word count is still being extracted. Repaints
-// itself in place once that resolves — safe even if the info page has moved
-// on by then, since it just checks the host is still attached.
+// Fills `host` with one subtle comparison line, or a "Counting words…"
+// placeholder while any target book's word count is still being extracted.
+// Repaints itself in place once that resolves — safe even if the info page
+// has moved on by then, since it just checks the host is still attached.
 function paintRecap(m, targets, host) {
   host.innerHTML = "";
   const missing = targets.filter((b) => b.wordCount == null);
@@ -341,7 +341,11 @@ function paintRecap(m, targets, host) {
   }
 
   const words = m.kind === "series" ? seriesWordsRead(m.series) : wordsRead(m.book);
-  if (!words) return; // nothing read yet worth comparing
+  const best = bestComparison(words);
+  if (!best) {
+    host.remove(); // nothing relevant to compare yet — no empty gap left behind
+    return;
+  }
 
   host.append(
     h(
@@ -351,31 +355,46 @@ function paintRecap(m, targets, host) {
       h("span", { class: "info-recap__labeltotal" }, words.toLocaleString() + " words read")
     )
   );
+  host.append(
+    h(
+      "div",
+      { class: "info-recap__row" },
+      h("span", { class: "info-recap__line" }, `You've read ${formatMultiplier(best.ratio)} ${best.ref.title}`),
+      h("button", { class: "info-recap__more", onclick: () => showRecapSheet(words) }, "See more")
+    )
+  );
+}
 
-  const track = h("div", { class: "info-recap__track" });
-  const dots = h("div", { class: "info-recap__dots" });
+// "See more" — a plain full-screen list of every reference book against the
+// same word count, reusing the editor overlay shell without its Save button.
+function showRecapSheet(words) {
+  el.editor.innerHTML = "";
+  el.editor.append(
+    h(
+      "div",
+      { class: "editor-bar" },
+      h("button", { class: "sbar__icon", "aria-label": "Close", onclick: () => closeOverlay() }, svg(ICON.close)),
+      h("div", { class: "editor-bar__title" }, "In other words"),
+      h("div", { style: "width:34px" })
+    )
+  );
+  const body = h("div", { class: "editor-body" });
+  body.append(h("p", { class: "editor-lead" }, `You've read ${words.toLocaleString()} words — here's how that stacks up against some well-known books.`));
+  const table = h("div", { class: "info-table info-table--flush" });
   for (const ref of COMPARISON_BOOKS) {
-    const ratio = words / ref.words;
-    track.append(
+    table.append(
       h(
         "div",
-        { class: "info-recap__card" },
-        h("div", { class: "info-recap__sentence" }, "You've read ", h("span", { class: "info-recap__mult" }, formatMultiplier(ratio)), " " + ref.title),
-        h("div", { class: "info-recap__refauthor" }, ref.author)
+        { class: "info-trow" },
+        h("span", { class: "info-trow__k" }, ref.title + " — " + ref.author),
+        h("span", { class: "info-trow__v" }, formatMultiplier(words / ref.words))
       )
     );
-    dots.append(h("span", { class: "info-recap__dot" }));
   }
-  dots.firstChild?.classList.add("info-recap__dot--on");
-  track.addEventListener(
-    "scroll",
-    () => {
-      const idx = Math.round(track.scrollLeft / (track.clientWidth || 1));
-      [...dots.children].forEach((d, i) => d.classList.toggle("info-recap__dot--on", i === idx));
-    },
-    { passive: true }
-  );
-  host.append(track, dots);
+  body.append(table);
+  el.editor.append(body);
+  el.editor.hidden = false;
+  armOverlay(closeEditor);
 }
 
 async function confirmDeleteSeries(s) {

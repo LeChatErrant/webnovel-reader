@@ -16,6 +16,15 @@ function countWords(text) {
 
 // Total words across every spine item (front/back matter included — it's a
 // negligible sliver of a whole novel, and we're comparing whole books).
+//
+// Spine items carry both `.href` (the raw path from the manifest, relative to
+// the package document) and `.url` (that path resolved to the absolute,
+// archive-ready form — what epub.js's own Section.load() actually requests
+// when rendering a chapter). archive.getText() expects the resolved form: it
+// blindly strips a leading "/" assuming one is already there. Pass `.href`
+// instead and it silently mangles the path, `zip.file()` finds nothing, and
+// getText() returns undefined rather than throwing — so every chapter must
+// use `.url`, or the count silently collapses to next to nothing.
 async function extractWordCount(book) {
   if (!book.fileBlob) return 0;
   const buffer = await book.fileBlob.arrayBuffer();
@@ -26,7 +35,8 @@ async function extractWordCount(book) {
     let total = 0;
     for (const item of items) {
       try {
-        total += countWords(stripHtml(await b.archive.getText(item.href)));
+        const html = await b.archive.getText(item.url || item.href);
+        if (html) total += countWords(stripHtml(html));
       } catch {
         /* unreadable spine item — skip it */
       }
