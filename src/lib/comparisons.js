@@ -5,21 +5,30 @@
 // ("< 0.1×" to a four-digit multiple). Word counts are widely-cited
 // approximations, not exact — this is a fun comparison, not a citation.
 // -------------------------------------------------------------------------
+// `part` disambiguates a reference that's a single installment or a whole
+// multi-book work, so "The Lord of the Rings" never gets mistaken for just
+// The Fellowship of the Ring, and "A Game of Thrones" never gets mistaken for
+// the whole Song of Ice and Fire.
 export const COMPARISON_BOOKS = [
   { title: "The Old Man and the Sea", author: "Ernest Hemingway", words: 27000 },
   { title: "Animal Farm", author: "George Orwell", words: 30000 },
   { title: "The Great Gatsby", author: "F. Scott Fitzgerald", words: 47000 },
   { title: "The Catcher in the Rye", author: "J. D. Salinger", words: 73000 },
-  { title: "Harry Potter and the Philosopher's Stone", author: "J. K. Rowling", words: 77000 },
+  { title: "Harry Potter and the Philosopher's Stone", author: "J. K. Rowling", words: 77000, part: "book 1" },
   { title: "1984", author: "George Orwell", words: 88000 },
   { title: "The Hobbit", author: "J. R. R. Tolkien", words: 95000 },
   { title: "To Kill a Mockingbird", author: "Harper Lee", words: 100000 },
   { title: "Pride and Prejudice", author: "Jane Austen", words: 122000 },
   { title: "Moby-Dick", author: "Herman Melville", words: 206000 },
-  { title: "A Game of Thrones", author: "George R. R. Martin", words: 284000 },
-  { title: "The Lord of the Rings", author: "J. R. R. Tolkien", words: 470000 },
+  { title: "A Game of Thrones", author: "George R. R. Martin", words: 284000, part: "book 1" },
+  { title: "The Lord of the Rings", author: "J. R. R. Tolkien", words: 470000, part: "all 3 books" },
   { title: "War and Peace", author: "Leo Tolstoy", words: 587000 },
 ];
+
+// "The Lord of the Rings (all 3 books)" — the plain title otherwise.
+export function refTitle(ref) {
+  return ref.part ? `${ref.title} (${ref.part})` : ref.title;
+}
 
 // "634×", "3.2×", "0.08×", "< 0.1×" — mirrors how the multiplier is read
 // aloud: whole numbers once they're big, one decimal in the middle, and a

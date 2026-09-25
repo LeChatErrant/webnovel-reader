@@ -10,8 +10,8 @@ import { progressMap, bookById, seriesById, deleteBook } from "./state.js";
 import { dbPut } from "./db.js";
 import { stripVolume } from "./lib/text.js";
 import { chapterCount } from "./lib/chapters.js";
-import { formatBytes, formatPublished, formatAdded, formatLang, stripHtml } from "./lib/format.js";
-import { COMPARISON_BOOKS, formatMultiplier, bestComparison } from "./lib/comparisons.js";
+import { formatBytes, formatPublished, formatAdded, formatLang, stripHtml, formatCompactNumber } from "./lib/format.js";
+import { COMPARISON_BOOKS, formatMultiplier, bestComparison, refTitle } from "./lib/comparisons.js";
 import { ensureWordCount, hasCurrentWordCount } from "./lib/wordcount.js";
 import {
   overrideOf, displayTitle, bookPercent, bookIsStarted, seriesVolumes, currentVolume,
@@ -207,11 +207,14 @@ export function renderInfo(kind, id) {
   // there's something to compare. Fills in asynchronously the first time (it
   // has to walk the epub for a word count), so it's appended as its own host
   // that repaints itself in place rather than a full renderInfo() re-run.
+  // For a series this is the total across every volume, not just the current
+  // one (seriesWordsRead sums them) — the volume sheet below covers the
+  // single-volume figure.
   const recapTargets = m.kind === "series" ? m.volumes : [m.book];
   if (recapTargets.some(bookIsStarted)) {
     const recapHost = h("div", { class: "info-recap" });
     content.append(recapHost);
-    paintRecap(m, recapTargets, recapHost);
+    paintRecap(recapTargets, () => (m.kind === "series" ? seriesWordsRead(m.series) : wordsRead(m.book)), recapHost);
   }
 
   // Volumes block (series only). Tapping a row selects that volume; the chapter
@@ -326,21 +329,23 @@ function renderVolumePreview(m, volId, host) {
 
 // Fills `host` with one subtle comparison line, or a "Counting words…"
 // placeholder while any target book's word count is still being extracted.
-// Repaints itself in place once that resolves — safe even if the info page
-// has moved on by then, since it just checks the host is still attached.
-function paintRecap(m, targets, host) {
+// Repaints itself in place once that resolves — safe even if the caller has
+// moved on by then, since it just checks the host is still attached.
+// `wordsFn` is read fresh on every repaint rather than passed as a value, so
+// it can depend on word counts that are still being filled in.
+function paintRecap(targets, wordsFn, host) {
   host.innerHTML = "";
   const missing = targets.filter((b) => !hasCurrentWordCount(b));
   if (missing.length) {
     host.append(h("div", { class: "lib-label info-recap__label" }, "In other words"));
     host.append(h("div", { class: "info-recap__loading" }, "Counting words…"));
     Promise.all(missing.map(ensureWordCount)).then(() => {
-      if (host.isConnected) paintRecap(m, targets, host);
+      if (host.isConnected) paintRecap(targets, wordsFn, host);
     });
     return;
   }
 
-  const words = m.kind === "series" ? seriesWordsRead(m.series) : wordsRead(m.book);
+  const words = wordsFn();
   const best = bestComparison(words);
   if (!best) {
     host.remove(); // nothing relevant to compare yet — no empty gap left behind
@@ -352,14 +357,14 @@ function paintRecap(m, targets, host) {
       "div",
       { class: "lib-label info-recap__label" },
       "In other words",
-      h("span", { class: "info-recap__labeltotal" }, words.toLocaleString() + " words read")
+      h("span", { class: "info-recap__labeltotal" }, formatCompactNumber(words) + " words read")
     )
   );
   host.append(
     h(
       "div",
       { class: "info-recap__row" },
-      h("span", { class: "info-recap__line" }, `You've read ${formatMultiplier(best.ratio)} ${best.ref.title}`),
+      h("span", { class: "info-recap__line" }, `You've read ${formatMultiplier(best.ratio)} ${refTitle(best.ref)}`),
       h("button", { class: "info-recap__more", onclick: () => showRecapSheet(words) }, "See more")
     )
   );
@@ -386,7 +391,7 @@ function showRecapSheet(words) {
       h(
         "div",
         { class: "info-trow" },
-        h("span", { class: "info-trow__k" }, ref.title + " — " + ref.author),
+        h("span", { class: "info-trow__k" }, refTitle(ref) + " — " + ref.author),
         h("span", { class: "info-trow__v" }, formatMultiplier(words / ref.words))
       )
     );
@@ -709,6 +714,14 @@ function showVolumeSheet(s, book, start, end) {
       h("button", { class: "text-btn text-btn--danger", onclick: removeVolume }, "Remove from series")
     )
   );
+
+  // Recap — this volume alone, not the series total (that's on the series
+  // info page above). Inserted before the chapters preview, after the facts.
+  if (bookIsStarted(book)) {
+    const recapHost = h("div", { class: "info-recap" });
+    card.querySelector(".vsheet__textactions").before(recapHost);
+    paintRecap([book], () => wordsRead(book), recapHost);
+  }
 
   // Chapters preview last (11a) — facts and destructive actions must not sit
   // after a list the reader is scanning. Absolute numbers, this-volume count.

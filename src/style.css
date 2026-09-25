@@ -521,7 +521,7 @@ html, body {
   padding-top: 11px;
   border-top: 1px solid var(--border-hair);
 }
-.info-recap__line { font: 400 12.5px var(--font-ui); color: var(--text-body); }
+.info-recap__line { font: 400 12.5px var(--font-ui); color: var(--text-dim); }
 .info-recap__more {
   appearance: none;
   border: 0;

@@ -4,6 +4,22 @@
 // unit-tested directly (see test/format.test.js).
 // -------------------------------------------------------------------------
 
+// "920" stays exact; "154,000" becomes "154K", "1,240,000" becomes "1.2M" —
+// a reading tally can run into the millions, where the exact count is just
+// noise next to the shape of the number.
+export function formatCompactNumber(n) {
+  if (n < 1000) return String(n);
+  try {
+    // Locale fixed to en-US rather than the device's: compact suffixes are
+    // otherwise inconsistently cased ("433.6k" in en-GB vs "433.6K" in
+    // en-US) for what's meant to read as one fixed visual style, not a
+    // localized number.
+    return new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 }).format(n);
+  } catch {
+    return n.toLocaleString();
+  }
+}
+
 export function formatBytes(n) {
   if (!n) return "";
   const mb = n / (1024 * 1024);
