@@ -12,7 +12,7 @@ import { stripVolume } from "./lib/text.js";
 import { chapterCount } from "./lib/chapters.js";
 import { formatBytes, formatPublished, formatAdded, formatLang, stripHtml } from "./lib/format.js";
 import { COMPARISON_BOOKS, formatMultiplier, bestComparison } from "./lib/comparisons.js";
-import { ensureWordCount } from "./lib/wordcount.js";
+import { ensureWordCount, hasCurrentWordCount } from "./lib/wordcount.js";
 import {
   overrideOf, displayTitle, bookPercent, bookIsStarted, seriesVolumes, currentVolume,
   volumeNumber, absChapterNum, volumeFirstAbs, wordsRead, seriesWordsRead,
@@ -330,7 +330,7 @@ function renderVolumePreview(m, volId, host) {
 // has moved on by then, since it just checks the host is still attached.
 function paintRecap(m, targets, host) {
   host.innerHTML = "";
-  const missing = targets.filter((b) => b.wordCount == null);
+  const missing = targets.filter((b) => !hasCurrentWordCount(b));
   if (missing.length) {
     host.append(h("div", { class: "lib-label info-recap__label" }, "In other words"));
     host.append(h("div", { class: "info-recap__loading" }, "Counting words…"));

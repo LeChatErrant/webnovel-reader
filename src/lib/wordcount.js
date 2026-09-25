@@ -9,6 +9,12 @@ import ePub from "epubjs";
 import { stripHtml } from "./format.js";
 import { dbPut } from "../db.js";
 
+// Bump this whenever extractWordCount's logic changes, so a book whose count
+// was cached under an older (possibly wrong) version gets recomputed instead
+// of keeping a stale number forever. v1 shipped with a bug (raw spine .href
+// instead of the resolved .url) that made most books count next to nothing.
+const WORD_COUNT_VERSION = 2;
+
 function countWords(text) {
   const m = text.trim().match(/\S+/g);
   return m ? m.length : 0;
@@ -51,11 +57,19 @@ async function extractWordCount(book) {
   }
 }
 
-// Resolves the book's word count, computing and persisting it if this is the
-// first time it's been asked for.
+// True once a book's word count is cached under the current logic version —
+// false for a book that's never been counted, or was counted under an older,
+// since-fixed version and needs redoing.
+export function hasCurrentWordCount(book) {
+  return book.wordCount != null && book.wordCountVersion === WORD_COUNT_VERSION;
+}
+
+// Resolves the book's word count, (re)computing and persisting it if it's
+// missing or was cached under an older, since-fixed version of the logic.
 export async function ensureWordCount(book) {
-  if (book.wordCount != null) return book.wordCount;
+  if (hasCurrentWordCount(book)) return book.wordCount;
   book.wordCount = await extractWordCount(book);
+  book.wordCountVersion = WORD_COUNT_VERSION;
   await dbPut("books", book);
   return book.wordCount;
 }
