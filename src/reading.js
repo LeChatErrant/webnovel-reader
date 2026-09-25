@@ -36,6 +36,18 @@ export function bookIsStarted(book) {
   return !!progressMap[book.id];
 }
 
+// Words read so far, from the book's cached total word count (see
+// lib/wordcount.js) scaled by its completion percentage — the same
+// chapter-based fraction the rest of the app already shows, so this never
+// disagrees with the % on screen.
+export function wordsRead(book) {
+  if (!book.wordCount) return 0;
+  return Math.round(book.wordCount * (bookPercent(book) / 100));
+}
+export function seriesWordsRead(s) {
+  return seriesVolumes(s).reduce((n, b) => n + wordsRead(b), 0);
+}
+
 export function seriesVolumes(s) {
   return (s.bookIds || []).map(bookById).filter(Boolean);
 }

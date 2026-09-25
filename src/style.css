@@ -500,6 +500,43 @@ html, body {
 .info-trow__k { color: var(--text-dimmest); }
 .info-trow__v { color: var(--text-body); text-align: right; }
 
+/* Recap — "in other words" comparison carousel. Native scroll-snap so it
+   swipes with the platform's own momentum/rubber-banding, no gesture code. */
+.info-recap { padding: 26px 0 0; }
+.info-recap__label {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 24px 10px;
+}
+.info-recap__labeltotal { text-transform: none; font-size: 11px; font-weight: 400; color: var(--text-dimmest); letter-spacing: 0; }
+.info-recap__loading { padding: 0 24px; font: 400 12.5px var(--font-ui); color: var(--text-dim); }
+.info-recap__track {
+  display: flex;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  padding: 0 24px;
+  gap: 12px;
+}
+.info-recap__track::-webkit-scrollbar { display: none; }
+.info-recap__card {
+  flex: 0 0 calc(100% - 24px);
+  scroll-snap-align: start;
+  padding: 22px 20px;
+  border-radius: 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+.info-recap__sentence { font: 300 16px/1.4 var(--font-serif); color: var(--text-secondary); }
+.info-recap__mult { font: 600 16px var(--font-ui); color: var(--fill-card); }
+.info-recap__refauthor { margin-top: 8px; font: 400 11.5px var(--font-ui); color: var(--text-dimmest); }
+.info-recap__dots { display: flex; justify-content: center; gap: 6px; padding-top: 12px; }
+.info-recap__dot { width: 5px; height: 5px; border-radius: 50%; background: var(--border-2f); }
+.info-recap__dot--on { background: var(--text-muted); }
+
 .info-vollabel { padding: 28px 24px 8px; }
 /* Volume rows / add-volume button on the info page keep 24px side padding. */
 .info-content .vrow { padding-left: 24px; padding-right: 24px; }

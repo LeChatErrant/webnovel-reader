@@ -11,9 +11,11 @@ import { dbPut } from "./db.js";
 import { stripVolume } from "./lib/text.js";
 import { chapterCount } from "./lib/chapters.js";
 import { formatBytes, formatPublished, formatAdded, formatLang, stripHtml } from "./lib/format.js";
+import { COMPARISON_BOOKS, formatMultiplier } from "./lib/comparisons.js";
+import { ensureWordCount } from "./lib/wordcount.js";
 import {
   overrideOf, displayTitle, bookPercent, bookIsStarted, seriesVolumes, currentVolume,
-  volumeNumber, absChapterNum, volumeFirstAbs,
+  volumeNumber, absChapterNum, volumeFirstAbs, wordsRead, seriesWordsRead,
 } from "./reading.js";
 import { openBook } from "./reader.js";
 import { go, currentInfo, selectedVolumeId, setSelectedVolumeId, armOverlay, closeOverlay } from "./router.js";
@@ -201,6 +203,17 @@ export function renderInfo(kind, id) {
   }
   content.append(table);
 
+  // Recap — "in other words" comparison against well-known books, once
+  // there's something to compare. Fills in asynchronously the first time (it
+  // has to walk the epub for a word count), so it's appended as its own host
+  // that repaints itself in place rather than a full renderInfo() re-run.
+  const recapTargets = m.kind === "series" ? m.volumes : [m.book];
+  if (recapTargets.some(bookIsStarted)) {
+    const recapHost = h("div", { class: "info-recap" });
+    content.append(recapHost);
+    paintRecap(m, recapTargets, recapHost);
+  }
+
   // Volumes block (series only). Tapping a row selects that volume; the chapter
   // list at the foot of the page then shows its chapters. Selection defaults to
   // the reading volume and survives in-page updates.
@@ -309,6 +322,60 @@ function renderVolumePreview(m, volId, host) {
     onSeeAll: () => openChapters("series", m.id, { volId: vol.id }),
   });
   if (preview) host.append(preview);
+}
+
+// Fills `host` with the recap carousel, or a "Counting words…" placeholder
+// while any target book's word count is still being extracted. Repaints
+// itself in place once that resolves — safe even if the info page has moved
+// on by then, since it just checks the host is still attached.
+function paintRecap(m, targets, host) {
+  host.innerHTML = "";
+  const missing = targets.filter((b) => b.wordCount == null);
+  if (missing.length) {
+    host.append(h("div", { class: "lib-label info-recap__label" }, "In other words"));
+    host.append(h("div", { class: "info-recap__loading" }, "Counting words…"));
+    Promise.all(missing.map(ensureWordCount)).then(() => {
+      if (host.isConnected) paintRecap(m, targets, host);
+    });
+    return;
+  }
+
+  const words = m.kind === "series" ? seriesWordsRead(m.series) : wordsRead(m.book);
+  if (!words) return; // nothing read yet worth comparing
+
+  host.append(
+    h(
+      "div",
+      { class: "lib-label info-recap__label" },
+      "In other words",
+      h("span", { class: "info-recap__labeltotal" }, words.toLocaleString() + " words read")
+    )
+  );
+
+  const track = h("div", { class: "info-recap__track" });
+  const dots = h("div", { class: "info-recap__dots" });
+  for (const ref of COMPARISON_BOOKS) {
+    const ratio = words / ref.words;
+    track.append(
+      h(
+        "div",
+        { class: "info-recap__card" },
+        h("div", { class: "info-recap__sentence" }, "You've read ", h("span", { class: "info-recap__mult" }, formatMultiplier(ratio)), " " + ref.title),
+        h("div", { class: "info-recap__refauthor" }, ref.author)
+      )
+    );
+    dots.append(h("span", { class: "info-recap__dot" }));
+  }
+  dots.firstChild?.classList.add("info-recap__dot--on");
+  track.addEventListener(
+    "scroll",
+    () => {
+      const idx = Math.round(track.scrollLeft / (track.clientWidth || 1));
+      [...dots.children].forEach((d, i) => d.classList.toggle("info-recap__dot--on", i === idx));
+    },
+    { passive: true }
+  );
+  host.append(track, dots);
 }
 
 async function confirmDeleteSeries(s) {
